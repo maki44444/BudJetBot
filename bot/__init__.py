@@ -2,7 +2,7 @@ import logging
 import os
 from datetime import time as dtime
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import BotCommand, BotCommandScopeChat, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     ContextTypes, filters,
@@ -16,6 +16,32 @@ REMINDER_HOUR = int(os.environ.get("REMINDER_HOUR", "21"))
 
 logging.basicConfig(format="%(asctime)s %(levelname)s %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+USER_COMMANDS = [
+    BotCommand("start", "Начать / показать меню"),
+    BotCommand("today", "Траты и доходы за сегодня"),
+    BotCommand("day", "Записи за день, напр. /day 05.07"),
+    BotCommand("month", "Разбивка по категориям за месяц"),
+    BotCommand("undo", "Отменить последнюю запись"),
+    BotCommand("categories", "Список категорий"),
+    BotCommand("addcategory", "Добавить категорию"),
+    BotCommand("limit", "Задать лимит, напр. /limit Продукты 20000"),
+    BotCommand("limits", "Прогресс по лимитам"),
+]
+
+ADMIN_COMMANDS = USER_COMMANDS + [
+    BotCommand("grant", "Выдать доступ пользователю"),
+    BotCommand("revoke", "Отозвать доступ"),
+    BotCommand("users", "Список пользователей с доступом"),
+]
+
+
+async def setup_commands(app: Application) -> None:
+    await app.bot.set_my_commands(USER_COMMANDS)
+    if access.ADMIN_ID:
+        await app.bot.set_my_commands(
+            ADMIN_COMMANDS, scope=BotCommandScopeChat(chat_id=access.ADMIN_ID)
+        )
 
 HELP_TEXT = (
     "Кнопки:\n"

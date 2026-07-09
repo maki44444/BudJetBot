@@ -10,7 +10,7 @@ import uvicorn
 
 import db
 from api import app as fastapi_app
-from bot import build_app
+from bot import build_app, setup_commands
 
 logging.basicConfig(format="%(asctime)s %(levelname)s %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -26,6 +26,7 @@ async def main():
 
     bot_app = build_app()
     await bot_app.initialize()
+    await setup_commands(bot_app)
     await bot_app.start()
     await bot_app.updater.start_polling(drop_pending_updates=True)
     logger.info("Telegram-бот запущен")
