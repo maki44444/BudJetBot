@@ -306,6 +306,18 @@ async def has_transactions_between(telegram_id: int, start: datetime, end: datet
         return bool(row["found"])
 
 
+async def get_transaction(telegram_id: int, transaction_id: int) -> dict | None:
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT t.id, t.type, t.amount, t.description, t.occurred_at,
+                   c.name AS category_name, c.icon AS category_icon
+            FROM transactions t
+            LEFT JOIN categories c ON c.id = t.category_id
+            WHERE t.id = $1 AND t.telegram_id = $2
+        """, transaction_id, telegram_id)
+        return dict(row) if row else None
+
+
 async def get_last_manual_transaction(telegram_id: int) -> dict | None:
     async with _pool.acquire() as conn:
         row = await conn.fetchrow("""

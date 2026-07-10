@@ -139,7 +139,11 @@ async def _reply_day(update: Update, uid: int, day, label: str):
     lines.append(f"\nРасходы: {common.fmt_amount(total_expense)}₽")
     if total_income:
         lines.append(f"Доходы: {common.fmt_amount(total_income)}₽")
-    await update.message.reply_text("\n".join(lines), reply_markup=keyboards.main_keyboard())
+    lines.append("\nНажми на запись, чтобы удалить её:")
+    await update.message.reply_text(
+        "\n".join(lines),
+        reply_markup=keyboards.day_delete_keyboard(txs, common.fmt_amount),
+    )
 
 
 async def cmd_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -211,6 +215,25 @@ async def cmd_undo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     desc = f" ({tx['description']})" if tx["description"] else ""
     await update.message.reply_text(
         f"Удалить последнюю запись: {sign}{common.fmt_amount(tx['amount'])}₽ — {label}{desc}?",
+        reply_markup=keyboards.confirm_keyboard(f"undo:{tx['id']}"),
+    )
+
+
+async def handle_delete_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    tx_id = int(query.data.split(":", 1)[1])
+    uid = update.effective_user.id
+    tx = await db.get_transaction(uid, tx_id)
+    if not tx:
+        await query.message.reply_text("Запись не найдена — возможно, уже удалена.")
+        return
+    label = f"{tx['category_icon']} {tx['category_name']}" if tx["category_name"] else "без категории"
+    sign = "+" if tx["type"] == "income" else "-"
+    desc = f" ({tx['description']})" if tx["description"] else ""
+    day = tx["occurred_at"].astimezone(common.MOSCOW).strftime("%d.%m.%Y")
+    await query.message.reply_text(
+        f"Удалить запись за {day}: {sign}{common.fmt_amount(tx['amount'])}₽ — {label}{desc}?",
         reply_markup=keyboards.confirm_keyboard(f"undo:{tx['id']}"),
     )
 
