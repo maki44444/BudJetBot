@@ -16,13 +16,17 @@
   </div>
 </div>
 <script>
-  // Виджет вставляется динамически, чтобы собрать data-auth-url от текущего origin
+  // Callback-режим надёжнее redirect-режима (data-auth-url): переход на бэкенд
+  // делаем сами, когда виджет отдал данные авторизации
+  window.onTelegramAuth = function (user) {
+    location.href = "/auth/telegram?" + new URLSearchParams(user).toString();
+  };
   var s = document.createElement("script");
   s.async = true;
   s.src = "https://telegram.org/js/telegram-widget.js?22";
   s.setAttribute("data-telegram-login", "__BOT_USERNAME__");
   s.setAttribute("data-size", "large");
-  s.setAttribute("data-auth-url", location.origin + "/auth/telegram");
+  s.setAttribute("data-onauth", "onTelegramAuth(user)");
   s.setAttribute("data-request-access", "write");
   document.getElementById("tg-login").appendChild(s);
 </script>
