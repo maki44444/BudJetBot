@@ -32,14 +32,37 @@
       <div class="tile">
         <div class="tile-label">Расходы</div>
         <div class="tile-value">{{ fmt(summary.totals.expense) }} ₽</div>
+        <div v-if="expenseDelta" class="tile-delta" :class="expenseDelta.pct > 0 ? 'delta-bad' : 'delta-good'">
+          {{ expenseDelta.text }} vs прошлый месяц
+        </div>
       </div>
       <div class="tile">
         <div class="tile-label">Доходы</div>
         <div class="tile-value">{{ fmt(summary.totals.income) }} ₽</div>
+        <div v-if="incomeDelta" class="tile-delta" :class="incomeDelta.pct >= 0 ? 'delta-good' : 'delta-bad'">
+          {{ incomeDelta.text }} vs прошлый месяц
+        </div>
       </div>
       <div class="tile">
         <div class="tile-label">Баланс</div>
         <div class="tile-value" :class="{'delta-good': balance >= 0}">{{ balance >= 0 ? '+' : '−' }}{{ fmt(Math.abs(balance)) }} ₽</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Расходы по дням</h3>
+      <p v-if="!summary.daily_expenses.length" class="muted">Нет расходов за этот месяц.</p>
+      <div v-else>
+        <div class="colchart" :style="{gridTemplateColumns: 'repeat(' + dailyBars.length + ', 1fr)'}">
+          <div class="colchart-slot" v-for="b in dailyBars" :key="b.day"
+               :title="b.day + '.' + month.slice(5) + ' — ' + fmt(b.total) + ' ₽'">
+            <div v-if="b.isMax" class="colchart-peak">{{ fmt(b.total) }}</div>
+            <div class="colchart-bar" :style="{height: b.hpct + '%'}"></div>
+          </div>
+        </div>
+        <div class="colchart-axis" :style="{gridTemplateColumns: 'repeat(' + dailyBars.length + ', 1fr)'}">
+          <span v-for="b in dailyBars" :key="b.day" class="colchart-tick">{{ b.tick ? b.day : '' }}</span>
+        </div>
       </div>
     </div>
 
@@ -51,8 +74,27 @@
         <div class="hbar-track">
           <div class="hbar-fill" :style="{width: barWidth(row.total)}"></div>
         </div>
-        <div class="hbar-value">{{ fmt(row.total) }} ₽</div>
+        <div class="hbar-value">
+          {{ fmt(row.total) }} ₽
+          <span v-if="catDelta(row)" class="hbar-delta" :class="catDelta(row).cls">{{ catDelta(row).text }}</span>
+        </div>
       </div>
+    </div>
+
+    <div class="card" v-if="summary.top_expenses.length">
+      <h3>Крупнейшие траты</h3>
+      <table class="tx-table">
+        <tbody>
+          <tr v-for="t in summary.top_expenses" :key="t.id">
+            <td class="tx-date">{{ shortDate(t.occurred_at) }}</td>
+            <td>
+              {{ t.category_icon }} {{ t.category_name }}
+              <span v-if="t.description" class="muted small">· {{ t.description }}</span>
+            </td>
+            <td class="tx-amount">−{{ fmt(t.amount) }} ₽</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
 
     <div class="card">

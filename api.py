@@ -115,16 +115,32 @@ def _month_range(month: str | None) -> tuple[datetime, datetime, str]:
 @app.get("/api/summary")
 async def api_summary(month: str | None = None, uid: int = Depends(get_current_user)):
     start, end, label = _month_range(month)
+    # Прошлый месяц — для сравнения
+    prev_year, prev_mon = (start.year - 1, 12) if start.month == 1 else (start.year, start.month - 1)
+    prev_start, prev_end, prev_label = _month_range(f"{prev_year:04d}-{prev_mon:02d}")
+
     totals = await db.get_totals(uid, start, end)
     expense_breakdown = await db.get_category_breakdown(uid, start, end, "expense")
     income_breakdown = await db.get_category_breakdown(uid, start, end, "income")
     budgets = await db.get_budget_progress(uid, start, end)
+    prev_totals = await db.get_totals(uid, prev_start, prev_end)
+    prev_expense = await db.get_category_breakdown(uid, prev_start, prev_end, "expense")
+    top_expenses = await db.get_top_expenses(uid, start, end, 5)
+    daily_expenses = await db.get_daily_expenses(uid, start, end)
+
     return {
         "month": label,
         "totals": totals,
         "expense_breakdown": expense_breakdown,
         "income_breakdown": income_breakdown,
         "budgets": budgets,
+        "prev": {
+            "month": prev_label,
+            "totals": prev_totals,
+            "expense_by_category": {str(r["category_id"]): r["total"] for r in prev_expense},
+        },
+        "top_expenses": top_expenses,
+        "daily_expenses": daily_expenses,
     }
 
 

@@ -379,6 +379,37 @@ async def update_transaction_category(telegram_id: int, transaction_id: int, cat
         return result != "UPDATE 0"
 
 
+async def get_daily_expenses(telegram_id: int, start: datetime, end: datetime) -> list[dict]:
+    """Сумма расходов по дням (дата в московском времени)."""
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT (occurred_at AT TIME ZONE 'Europe/Moscow')::date AS day,
+                   SUM(amount) AS total
+            FROM transactions
+            WHERE telegram_id = $1 AND type = 'expense'
+              AND occurred_at >= $2 AND occurred_at < $3
+            GROUP BY day
+            ORDER BY day
+        """, telegram_id, start, end)
+        return [{"day": r["day"].day, "total": r["total"]} for r in rows]
+
+
+async def get_top_expenses(telegram_id: int, start: datetime, end: datetime, limit: int = 5) -> list[dict]:
+    """Крупнейшие траты за период."""
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT t.id, t.amount, t.description, t.occurred_at,
+                   c.name AS category_name, c.icon AS category_icon
+            FROM transactions t
+            LEFT JOIN categories c ON c.id = t.category_id
+            WHERE t.telegram_id = $1 AND t.type = 'expense'
+              AND t.occurred_at >= $2 AND t.occurred_at < $3
+            ORDER BY t.amount DESC, t.occurred_at DESC
+            LIMIT $4
+        """, telegram_id, start, end, limit)
+        return [dict(r) for r in rows]
+
+
 async def get_totals(telegram_id: int, start: datetime, end: datetime) -> dict:
     """Суммы расходов и доходов за период."""
     async with _pool.acquire() as conn:

@@ -39,11 +39,52 @@ createApp({
       if (!this.summary || !this.summary.expense_breakdown.length) return 1;
       return Math.max(...this.summary.expense_breakdown.map((r) => Number(r.total)));
     },
+    expenseDelta() {
+      return this.pctDelta(this.summary?.totals.expense, this.summary?.prev.totals.expense);
+    },
+    incomeDelta() {
+      return this.pctDelta(this.summary?.totals.income, this.summary?.prev.totals.income);
+    },
+    dailyBars() {
+      if (!this.summary) return [];
+      const [y, m] = this.month.split("-").map(Number);
+      const daysInMonth = new Date(y, m, 0).getDate();
+      const byDay = {};
+      for (const d of this.summary.daily_expenses) byDay[d.day] = Number(d.total);
+      const max = Math.max(1, ...Object.values(byDay));
+      const bars = [];
+      for (let day = 1; day <= daysInMonth; day++) {
+        const total = byDay[day] || 0;
+        bars.push({
+          day,
+          total,
+          hpct: (total / max) * 100,
+          isMax: total === max && total > 0,
+          tick: day === 1 || day % 5 === 0,
+        });
+      }
+      return bars;
+    },
   },
 
   methods: {
     fmt(n) {
       return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(Number(n));
+    },
+    pctDelta(cur, prev) {
+      cur = Number(cur); prev = Number(prev);
+      if (!prev) return null;   // прошлый месяц пуст — сравнивать не с чем
+      const pct = Math.round(((cur - prev) / prev) * 100);
+      return { pct, text: (pct >= 0 ? "+" : "−") + Math.abs(pct) + "%" };
+    },
+    catDelta(row) {
+      const prevMap = this.summary?.prev.expense_by_category || {};
+      if (!Object.keys(prevMap).length) return null;  // прошлый месяц пуст — сравнивать не с чем
+      const prev = prevMap[String(row.category_id)];
+      if (prev === undefined) return { text: "новое", cls: "muted" };
+      const d = this.pctDelta(row.total, prev);
+      if (!d) return null;
+      return { text: d.text, cls: d.pct > 0 ? "delta-bad" : "delta-good" };
     },
     shortDate(iso) {
       const d = new Date(iso);
