@@ -1,6 +1,6 @@
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -142,6 +142,15 @@ async def api_summary(month: str | None = None, uid: int = Depends(get_current_u
         "top_expenses": top_expenses,
         "daily_expenses": daily_expenses,
     }
+
+
+@app.get("/api/daily")
+async def api_daily(days: int = Query(7, ge=1, le=90), uid: int = Depends(get_current_user)):
+    """Расходы по дням за последние N дней (скользящее окно от сегодня, МСК)."""
+    now = datetime.now(MOSCOW)
+    end = MOSCOW.localize(datetime(now.year, now.month, now.day)) + timedelta(days=1)
+    start = end - timedelta(days=days)
+    return {"items": await db.get_daily_expenses(uid, start, end)}
 
 
 @app.get("/api/transactions")

@@ -50,20 +50,27 @@
     </div>
 
     <div class="card">
-      <h3>Расходы по дням</h3>
-      <p v-if="!summary.daily_expenses.length" class="muted">Нет расходов за этот месяц.</p>
+      <div class="card-head">
+        <h3>Расходы по дням</h3>
+        <div class="chips">
+          <button :class="{active: chartDays === 7}" @click="setChartDays(7)">7 дней</button>
+          <button :class="{active: chartDays === 14}" @click="setChartDays(14)">14 дней</button>
+          <button :class="{active: chartDays === null}" @click="setChartDays(null)">Месяц</button>
+        </div>
+      </div>
+      <p v-if="!dailyView.hasData" class="muted">Нет расходов за выбранный период.</p>
       <div v-else class="colchart-wrap">
-        <div class="colchart" :style="{gridTemplateColumns: 'repeat(' + dailyBars.length + ', 1fr)'}">
-          <div class="colchart-grid" v-for="g in dailyGrid" :key="g.pct" :style="{bottom: g.pct + '%'}">
+        <div class="colchart" :style="{gridTemplateColumns: 'repeat(' + dailyView.bars.length + ', 1fr)'}">
+          <div class="colchart-grid" v-for="g in dailyView.grid" :key="g.pct" :style="{bottom: g.pct + '%'}">
             <span>{{ fmt(g.value) }} ₽</span>
           </div>
-          <div class="colchart-slot" v-for="b in dailyBars" :key="b.day" :title="b.title">
+          <div class="colchart-slot" v-for="b in dailyView.bars" :key="b.key" :title="b.title">
             <div v-if="b.isMax" class="colchart-peak">{{ fmt(b.total) }}</div>
             <div class="colchart-bar" :style="{height: b.hpct + '%'}"></div>
           </div>
         </div>
-        <div class="colchart-axis" :style="{gridTemplateColumns: 'repeat(' + dailyBars.length + ', 1fr)'}">
-          <span v-for="b in dailyBars" :key="b.day" class="colchart-tick">{{ b.tick ? b.day : '' }}</span>
+        <div class="colchart-axis" :style="{gridTemplateColumns: 'repeat(' + dailyView.bars.length + ', 1fr)'}">
+          <span v-for="b in dailyView.bars" :key="b.key" class="colchart-tick">{{ b.tickLabel }}</span>
         </div>
       </div>
     </div>

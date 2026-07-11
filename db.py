@@ -391,7 +391,7 @@ async def get_daily_expenses(telegram_id: int, start: datetime, end: datetime) -
             GROUP BY day
             ORDER BY day
         """, telegram_id, start, end)
-        return [{"day": r["day"].day, "total": r["total"]} for r in rows]
+        return [{"date": r["day"].isoformat(), "total": r["total"]} for r in rows]
 
 
 async def get_top_expenses(telegram_id: int, start: datetime, end: datetime, limit: int = 5) -> list[dict]:

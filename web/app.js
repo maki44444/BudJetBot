@@ -23,6 +23,8 @@ createApp({
       categories: { expense: [], income: [] },
       limitDrafts: {},
       loading: false,
+      chartDays: null,      // null = месяц, 7 или 14 = скользящее окно от сегодня
+      dailyExtra: [],       // данные для окон 7/14 дней (грузятся отдельно)
     };
   },
 
@@ -45,52 +47,79 @@ createApp({
     incomeDelta() {
       return this.pctDelta(this.summary?.totals.income, this.summary?.prev.totals.income);
     },
-    dailyTop() {
-      // Верхняя граница шкалы — «круглое» значение чуть выше максимума дня
-      if (!this.summary) return 1;
-      const max = Math.max(0, ...this.summary.daily_expenses.map((d) => Number(d.total)));
-      if (!max) return 1;
-      const pow = Math.pow(10, Math.floor(Math.log10(max)));
-      for (const mult of [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) {
-        if (mult * pow >= max) return mult * pow;
+    chartDates() {
+      // Даты окна графика (ISO-строки): месяц целиком или последние N дней
+      const pad = (n) => String(n).padStart(2, "0");
+      const dates = [];
+      if (!this.chartDays) {
+        const [y, m] = this.month.split("-").map(Number);
+        const daysInMonth = new Date(y, m, 0).getDate();
+        for (let d = 1; d <= daysInMonth; d++) dates.push(`${y}-${pad(m)}-${pad(d)}`);
+      } else {
+        const today = new Date();
+        for (let i = this.chartDays - 1; i >= 0; i--) {
+          const dt = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+          dates.push(`${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`);
+        }
       }
-      return max;
+      return dates;
     },
-    dailyGrid() {
-      if (this.dailyTop <= 1) return [];
-      return [
-        { value: this.dailyTop / 2, pct: 50 },
-        { value: this.dailyTop, pct: 100 },
-      ];
-    },
-    dailyBars() {
-      if (!this.summary) return [];
-      const [y, m] = this.month.split("-").map(Number);
-      const daysInMonth = new Date(y, m, 0).getDate();
-      const byDay = {};
-      for (const d of this.summary.daily_expenses) byDay[d.day] = Number(d.total);
-      const max = Math.max(0, ...Object.values(byDay));
-      const bars = [];
-      for (let day = 1; day <= daysInMonth; day++) {
-        const total = byDay[day] || 0;
-        const date = new Date(y, m - 1, day);
-        bars.push({
-          day,
+    dailyView() {
+      const items = this.chartDays ? this.dailyExtra : (this.summary ? this.summary.daily_expenses : []);
+      const byDate = {};
+      for (const it of items) byDate[it.date] = Number(it.total);
+      const dates = this.chartDates;
+      const totals = dates.map((d) => byDate[d] || 0);
+      const max = Math.max(0, ...totals);
+      const top = this.niceCeil(max);
+      const bars = dates.map((iso, i) => {
+        const [y, m, d] = iso.split("-").map(Number);
+        const date = new Date(y, m - 1, d);
+        const total = totals[i];
+        let tickLabel = "";
+        if (this.chartDays === 7) {
+          tickLabel = date.toLocaleDateString("ru-RU", { weekday: "short" });
+        } else if (this.chartDays === 14) {
+          tickLabel = String(d);
+        } else if (d === 1 || d % 5 === 0) {
+          tickLabel = String(d);
+        }
+        return {
+          key: iso,
           total,
-          hpct: total > 0 ? Math.max((total / this.dailyTop) * 100, 2) : 0,
+          hpct: total > 0 ? Math.max((total / top) * 100, 2) : 0,
           isMax: total === max && total > 0,
-          tick: day === 1 || day % 5 === 0,
+          tickLabel,
           title: date.toLocaleDateString("ru-RU", { weekday: "short", day: "numeric", month: "long" })
             + " — " + this.fmt(total) + " ₽",
-        });
-      }
-      return bars;
+        };
+      });
+      return {
+        bars,
+        hasData: max > 0,
+        grid: top > 1 ? [{ value: top / 2, pct: 50 }, { value: top, pct: 100 }] : [],
+      };
     },
   },
 
   methods: {
     fmt(n) {
       return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(Number(n));
+    },
+    niceCeil(v) {
+      // «Круглая» верхняя граница шкалы чуть выше максимума
+      if (v <= 0) return 1;
+      const pow = Math.pow(10, Math.floor(Math.log10(v)));
+      for (const mult of [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) {
+        if (mult * pow >= v) return mult * pow;
+      }
+      return v;
+    },
+    async setChartDays(days) {
+      this.chartDays = days;
+      if (days) {
+        this.dailyExtra = (await this.api(`/api/daily?days=${days}`)).items;
+      }
     },
     pctDelta(cur, prev) {
       cur = Number(cur); prev = Number(prev);
