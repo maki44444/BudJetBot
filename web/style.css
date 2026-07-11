@@ -1,0 +1,238 @@
+/* Палитра — референсные значения dataviz-гайда, светлая и тёмная тема */
+:root {
+  --page: #f9f9f7;
+  --surface-1: #fcfcfb;
+  --ink-1: #0b0b0b;
+  --ink-2: #52514e;
+  --ink-muted: #898781;
+  --grid: #e1e0d9;
+  --border: rgba(11, 11, 11, 0.10);
+  --series-1: #2a78d6;        /* категориальный слот 1 (синий) */
+  --series-track: #cde2fb;    /* светлая ступень того же синего */
+  --good-text: #006300;
+  --warning: #fab219;
+  --warning-track: #fbecc8;
+  --critical: #d03b3b;
+  --critical-track: #f5d2d2;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #0d0d0d;
+    --surface-1: #1a1a19;
+    --ink-1: #ffffff;
+    --ink-2: #c3c2b7;
+    --ink-muted: #898781;
+    --grid: #2c2c2a;
+    --border: rgba(255, 255, 255, 0.10);
+    --series-1: #3987e5;
+    --series-track: #104281;
+    --good-text: #0ca30c;
+    --warning-track: #45350f;
+    --critical-track: #451c1c;
+  }
+}
+
+* { box-sizing: border-box; }
+[v-cloak] { display: none; }
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink-1);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.page { max-width: 720px; margin: 0 auto; padding: 16px 12px 48px; }
+
+.muted { color: var(--ink-muted); }
+.small { font-size: 13px; }
+.delta-good { color: var(--good-text); }
+
+/* ── Шапка ── */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.brand { font-weight: 600; font-size: 17px; }
+.month-nav { display: flex; align-items: center; gap: 4px; }
+.month-label { min-width: 130px; text-align: center; font-weight: 500; }
+
+.icon-btn, .ghost-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink-1);
+  cursor: pointer;
+  font: inherit;
+  padding: 4px 10px;
+}
+.icon-btn { padding: 4px 12px; font-size: 16px; }
+.icon-btn:hover, .ghost-btn:hover { background: var(--grid); }
+.ghost-btn.wide { display: block; width: 100%; margin-top: 12px; }
+
+/* ── Табы ── */
+.tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+.tabs button {
+  flex: 1;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--ink-2);
+  cursor: pointer;
+  font: inherit;
+  padding: 8px 0;
+}
+.tabs button.active {
+  background: var(--surface-1);
+  border-color: var(--series-1);
+  color: var(--ink-1);
+  font-weight: 600;
+}
+
+/* ── Плитки KPI ── */
+.kpi-row { display: flex; gap: 10px; margin-bottom: 12px; }
+.tile {
+  flex: 1;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.tile-label { color: var(--ink-2); font-size: 13px; margin-bottom: 4px; }
+.tile-value { font-size: 22px; font-weight: 600; }
+
+/* ── Карточки ── */
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+.card h3 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
+
+/* ── Горизонтальные бары (расходы по категориям) ── */
+.hbar-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 40%) 1fr auto;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.hbar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hbar-track { background: none; }
+.hbar-fill {
+  height: 16px;
+  min-width: 2px;
+  background: var(--series-1);
+  border-radius: 0 4px 4px 0;  /* скругление на конце данных, прямой у базовой линии */
+}
+.hbar-value {
+  color: var(--ink-2);
+  font-size: 13px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Метры лимитов ── */
+.meter-row { margin-bottom: 12px; }
+.meter-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.meter-status { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.meter-status.st-critical { color: var(--critical); font-weight: 600; }
+.meter-track {
+  height: 12px;
+  border-radius: 0 4px 4px 0;
+  background: var(--series-track);
+  overflow: hidden;
+}
+.meter-fill { height: 100%; background: var(--series-1); border-radius: 0 4px 4px 0; }
+.meter-track.st-warning { background: var(--warning-track); }
+.meter-track.st-warning .meter-fill { background: var(--warning); }
+.meter-track.st-critical { background: var(--critical-track); }
+.meter-track.st-critical .meter-fill { background: var(--critical); }
+
+/* ── История ── */
+.filter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+select, input[type="number"] {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink-1);
+  font: inherit;
+  padding: 5px 8px;
+  max-width: 100%;
+}
+
+.tx-table { width: 100%; border-collapse: collapse; }
+.tx-table td {
+  border-top: 1px solid var(--grid);
+  padding: 7px 4px;
+  vertical-align: middle;
+}
+.tx-table tr:first-child td { border-top: none; }
+.tx-date { color: var(--ink-muted); font-size: 13px; white-space: nowrap; width: 48px; }
+.tx-cat { display: flex; flex-direction: column; gap: 2px; }
+.tx-amount {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+.tx-del { width: 36px; text-align: right; }
+
+/* ── Лимиты (управление) ── */
+.limits-table { width: 100%; border-collapse: collapse; }
+.limits-table td {
+  border-top: 1px solid var(--grid);
+  padding: 8px 4px;
+  vertical-align: middle;
+}
+.limits-table tr:first-child td { border-top: none; }
+.limit-edit { display: flex; gap: 6px; justify-content: flex-end; }
+.limit-edit input { width: 110px; }
+
+/* Перезагрузка данных: держим прежний рендер полупрозрачным, без скачков */
+.stale { opacity: 0.6; transition: opacity 0.15s; }
+
+/* ── Логин ── */
+.login-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: var(--page);
+}
+.login-card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  max-width: 360px;
+  padding: 32px 28px;
+  text-align: center;
+}
+.login-card h1 { margin: 0 0 8px; font-size: 24px; }
+.login-card p { color: var(--ink-2); }
+#tg-login { display: flex; justify-content: center; margin: 20px 0; }
+
+@media (max-width: 560px) {
+  .kpi-row { flex-direction: column; }
+  .hbar-row { grid-template-columns: minmax(90px, 35%) 1fr auto; }
+  .month-label { min-width: 110px; }
+}

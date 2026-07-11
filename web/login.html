@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Бюджет — вход</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="login-page">
+  <div class="login-card">
+    <h1>💰 Бюджет</h1>
+    <p>Личный трекер расходов и доходов.<br>Войди через Telegram — тот же аккаунт, что и в боте.</p>
+    <div id="tg-login"></div>
+    <p class="muted small">Доступ только по whitelist — если бот тебя не знает, попроси доступ у администратора.</p>
+  </div>
+</div>
+<script>
+  // Виджет вставляется динамически, чтобы собрать data-auth-url от текущего origin
+  var s = document.createElement("script");
+  s.async = true;
+  s.src = "https://telegram.org/js/telegram-widget.js?22";
+  s.setAttribute("data-telegram-login", "__BOT_USERNAME__");
+  s.setAttribute("data-size", "large");
+  s.setAttribute("data-auth-url", location.origin + "/auth/telegram");
+  s.setAttribute("data-request-access", "write");
+  document.getElementById("tg-login").appendChild(s);
+</script>
+</body>
+</html>

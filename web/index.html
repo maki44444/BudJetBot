@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Бюджет</title>
+<link rel="stylesheet" href="/style.css">
+<script src="https://unpkg.com/vue@3.4.38/dist/vue.global.prod.js"></script>
+</head>
+<body>
+<div id="app" class="page" v-cloak>
+
+  <header class="topbar">
+    <div class="brand">💰 Бюджет</div>
+    <div class="month-nav">
+      <button class="icon-btn" @click="prevMonth" aria-label="Предыдущий месяц">‹</button>
+      <span class="month-label">{{ monthLabel }}</span>
+      <button class="icon-btn" @click="nextMonth" aria-label="Следующий месяц">›</button>
+    </div>
+    <button class="ghost-btn" @click="logout">Выйти</button>
+  </header>
+
+  <nav class="tabs">
+    <button :class="{active: tab==='dashboard'}" @click="tab='dashboard'">Дашборд</button>
+    <button :class="{active: tab==='history'}" @click="tab='history'">История</button>
+    <button :class="{active: tab==='limits'}" @click="tab='limits'">Лимиты</button>
+  </nav>
+
+  <!-- ДАШБОРД -->
+  <section v-if="tab==='dashboard' && summary" :class="{stale: loading}">
+    <div class="kpi-row">
+      <div class="tile">
+        <div class="tile-label">Расходы</div>
+        <div class="tile-value">{{ fmt(summary.totals.expense) }} ₽</div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">Доходы</div>
+        <div class="tile-value">{{ fmt(summary.totals.income) }} ₽</div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">Баланс</div>
+        <div class="tile-value" :class="{'delta-good': balance >= 0}">{{ balance >= 0 ? '+' : '−' }}{{ fmt(Math.abs(balance)) }} ₽</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Расходы по категориям</h3>
+      <p v-if="!summary.expense_breakdown.length" class="muted">Нет расходов за этот месяц.</p>
+      <div class="hbar-row" v-for="row in summary.expense_breakdown" :key="row.category_id">
+        <div class="hbar-label">{{ row.icon }} {{ row.name }}</div>
+        <div class="hbar-track">
+          <div class="hbar-fill" :style="{width: barWidth(row.total)}"></div>
+        </div>
+        <div class="hbar-value">{{ fmt(row.total) }} ₽</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Лимиты</h3>
+      <p v-if="!summary.budgets.length" class="muted">
+        Лимиты не заданы — добавь на вкладке «Лимиты».
+      </p>
+      <div class="meter-row" v-for="b in summary.budgets" :key="b.category_id">
+        <div class="meter-head">
+          <span>{{ b.icon }} {{ b.name }}</span>
+          <span class="meter-status" :class="'st-' + budgetState(b)">
+            {{ fmt(b.spent) }} / {{ fmt(b.budget) }} ₽ · {{ budgetPct(b) }}%
+            <template v-if="budgetState(b)==='critical'"> · ⚠ превышен</template>
+            <template v-else-if="budgetState(b)==='warning'"> · почти исчерпан</template>
+          </span>
+        </div>
+        <div class="meter-track" :class="'st-' + budgetState(b)">
+          <div class="meter-fill" :style="{width: Math.min(budgetPct(b), 100) + '%'}"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ИСТОРИЯ -->
+  <section v-if="tab==='history'" :class="{stale: loading}">
+    <div class="filter-row">
+      <select v-model="filterCategory" @change="reloadTx">
+        <option :value="null">Все категории</option>
+        <optgroup label="Расходы">
+          <option v-for="c in categories.expense" :key="c.id" :value="c.id">{{ c.icon }} {{ c.name }}</option>
+        </optgroup>
+        <optgroup label="Доходы">
+          <option v-for="c in categories.income" :key="c.id" :value="c.id">{{ c.icon }} {{ c.name }}</option>
+        </optgroup>
+      </select>
+      <span class="muted small">{{ tx.total }} записей</span>
+    </div>
+
+    <div class="card">
+      <p v-if="!tx.items.length" class="muted">Записей за этот месяц нет.</p>
+      <table v-else class="tx-table">
+        <tbody>
+          <tr v-for="t in tx.items" :key="t.id">
+            <td class="tx-date">{{ shortDate(t.occurred_at) }}</td>
+            <td class="tx-cat">
+              <select :value="t.category_id" @change="changeCategory(t, $event)">
+                <optgroup :label="t.type === 'income' ? 'Доходы' : 'Расходы'">
+                  <option v-for="c in categories[t.type]" :key="c.id" :value="c.id">{{ c.icon }} {{ c.name }}</option>
+                </optgroup>
+              </select>
+              <span v-if="t.description" class="muted small">{{ t.description }}</span>
+            </td>
+            <td class="tx-amount" :class="{'delta-good': t.type==='income'}">
+              {{ t.type==='income' ? '+' : '−' }}{{ fmt(t.amount) }} ₽
+            </td>
+            <td class="tx-del">
+              <button class="icon-btn" @click="removeTx(t)" aria-label="Удалить запись">✕</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <button v-if="tx.items.length < tx.total" class="ghost-btn wide" @click="loadMoreTx">
+        Показать ещё
+      </button>
+    </div>
+  </section>
+
+  <!-- ЛИМИТЫ -->
+  <section v-if="tab==='limits'" :class="{stale: loading}">
+    <div class="card">
+      <h3>Месячные лимиты по категориям</h3>
+      <p class="muted small">Введи сумму и нажми «Сохранить». 0 — снять лимит.</p>
+      <table class="limits-table">
+        <tbody>
+          <tr v-for="c in categories.expense" :key="c.id">
+            <td>{{ c.icon }} {{ c.name }}</td>
+            <td class="muted">{{ currentLimit(c.id) !== null ? fmt(currentLimit(c.id)) + ' ₽' : '—' }}</td>
+            <td class="limit-edit">
+              <input type="number" min="0" step="100" v-model.number="limitDrafts[c.id]" placeholder="сумма">
+              <button class="ghost-btn" @click="saveLimit(c.id)">Сохранить</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+<script src="/app.js"></script>
+</body>
+</html>

@@ -339,6 +339,59 @@ async def delete_transaction(telegram_id: int, transaction_id: int) -> bool:
         return result != "DELETE 0"
 
 
+async def get_transactions_page(
+    telegram_id: int,
+    start: datetime,
+    end: datetime,
+    category_id: int | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[dict], int]:
+    """Страница истории операций + общее число записей под фильтром."""
+    async with _pool.acquire() as conn:
+        where = "t.telegram_id = $1 AND t.occurred_at >= $2 AND t.occurred_at < $3"
+        args: list = [telegram_id, start, end]
+        if category_id is not None:
+            args.append(category_id)
+            where += f" AND t.category_id = ${len(args)}"
+        total = await conn.fetchval(
+            f"SELECT COUNT(*) FROM transactions t WHERE {where}", *args
+        )
+        args += [limit, offset]
+        rows = await conn.fetch(f"""
+            SELECT t.id, t.type, t.amount, t.description, t.occurred_at, t.source,
+                   t.category_id, c.name AS category_name, c.icon AS category_icon
+            FROM transactions t
+            LEFT JOIN categories c ON c.id = t.category_id
+            WHERE {where}
+            ORDER BY t.occurred_at DESC, t.id DESC
+            LIMIT ${len(args) - 1} OFFSET ${len(args)}
+        """, *args)
+        return [dict(r) for r in rows], total
+
+
+async def update_transaction_category(telegram_id: int, transaction_id: int, category_id: int) -> bool:
+    async with _pool.acquire() as conn:
+        result = await conn.execute("""
+            UPDATE transactions SET category_id = $3
+            WHERE id = $1 AND telegram_id = $2
+        """, transaction_id, telegram_id, category_id)
+        return result != "UPDATE 0"
+
+
+async def get_totals(telegram_id: int, start: datetime, end: datetime) -> dict:
+    """Суммы расходов и доходов за период."""
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT
+                COALESCE(SUM(amount) FILTER (WHERE type = 'expense'), 0) AS expense,
+                COALESCE(SUM(amount) FILTER (WHERE type = 'income'), 0) AS income
+            FROM transactions
+            WHERE telegram_id = $1 AND occurred_at >= $2 AND occurred_at < $3
+        """, telegram_id, start, end)
+        return {"expense": row["expense"], "income": row["income"]}
+
+
 # ---------- budgets ----------
 
 async def set_budget(telegram_id: int, category_id: int, amount) -> None:
