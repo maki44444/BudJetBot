@@ -152,6 +152,16 @@ createApp({
       if (pct >= 80) return "warning";
       return "ok";
     },
+    budgetProj(b) {
+      // Прогнозный % лимита к концу месяца; показываем только если грозит превышение
+      const f = this.summary?.forecast;
+      if (!f) return null;
+      const spent = Number(b.spent), budget = Number(b.budget);
+      if (!budget || spent >= budget) return null;  // уже превышен — прогноз не нужен
+      const projection = (spent / f.days_elapsed) * f.days_in_month;
+      const projPct = Math.round((projection / budget) * 100);
+      return projPct > 100 ? projPct : null;
+    },
     currentLimit(categoryId) {
       if (!this.summary) return null;
       const b = this.summary.budgets.find((x) => x.category_id === categoryId);

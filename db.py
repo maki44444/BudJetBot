@@ -116,6 +116,16 @@ async def _create_tables() -> None:
             )
         """)
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS limit_alerts (
+                telegram_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+                category_id INT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+                month       TEXT NOT NULL,
+                kind        TEXT NOT NULL CHECK (kind IN ('forecast', 'exceeded')),
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (telegram_id, category_id, month, kind)
+            )
+        """)
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS no_spend_days (
                 telegram_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
                 day         DATE NOT NULL,
@@ -460,6 +470,34 @@ async def get_budget_progress(telegram_id: int, start: datetime, end: datetime) 
             ORDER BY c.name
         """, telegram_id, start, end)
         return [dict(r) for r in rows]
+
+
+async def get_users_with_budgets() -> list[dict]:
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT DISTINCT b.telegram_id, u.is_allowed
+            FROM budgets b
+            JOIN users u ON u.telegram_id = b.telegram_id
+        """)
+        return [dict(r) for r in rows]
+
+
+async def was_limit_alert_sent(telegram_id: int, category_id: int, month: str, kind: str) -> bool:
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT 1 FROM limit_alerts
+            WHERE telegram_id = $1 AND category_id = $2 AND month = $3 AND kind = $4
+        """, telegram_id, category_id, month, kind)
+        return row is not None
+
+
+async def mark_limit_alert_sent(telegram_id: int, category_id: int, month: str, kind: str) -> None:
+    async with _pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO limit_alerts (telegram_id, category_id, month, kind)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT DO NOTHING
+        """, telegram_id, category_id, month, kind)
 
 
 # ---------- no_spend_days ----------

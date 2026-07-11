@@ -35,6 +35,9 @@
         <div v-if="expenseDelta" class="tile-delta" :class="expenseDelta.pct > 0 ? 'delta-bad' : 'delta-good'">
           {{ expenseDelta.text }} vs прошлый месяц
         </div>
+        <div v-if="summary.forecast" class="tile-delta muted">
+          прогноз на месяц ~{{ fmt(summary.forecast.expense_forecast) }} ₽
+        </div>
       </div>
       <div class="tile">
         <div class="tile-label">Доходы</div>
@@ -118,6 +121,7 @@
             {{ fmt(b.spent) }} / {{ fmt(b.budget) }} ₽ · {{ budgetPct(b) }}%
             <template v-if="budgetState(b)==='critical'"> · ⚠ превышен</template>
             <template v-else-if="budgetState(b)==='warning'"> · почти исчерпан</template>
+            <span v-if="budgetProj(b)" class="muted"> · 📈 к концу месяца ~{{ budgetProj(b) }}%</span>
           </span>
         </div>
         <div class="meter-track" :class="'st-' + budgetState(b)">

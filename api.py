@@ -128,7 +128,20 @@ async def api_summary(month: str | None = None, uid: int = Depends(get_current_u
     top_expenses = await db.get_top_expenses(uid, start, end, 5)
     daily_expenses = await db.get_daily_expenses(uid, start, end)
 
+    # Прогноз до конца месяца — только для текущего месяца
+    now = datetime.now(MOSCOW)
+    forecast = None
+    if (start.year, start.month) == (now.year, now.month) and totals["expense"]:
+        days_in_month = (end - start).days
+        days_elapsed = now.day
+        forecast = {
+            "days_elapsed": days_elapsed,
+            "days_in_month": days_in_month,
+            "expense_forecast": float(totals["expense"]) / days_elapsed * days_in_month,
+        }
+
     return {
+        "forecast": forecast,
         "month": label,
         "totals": totals,
         "expense_breakdown": expense_breakdown,
