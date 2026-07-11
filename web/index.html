@@ -52,10 +52,12 @@
     <div class="card">
       <h3>Расходы по дням</h3>
       <p v-if="!summary.daily_expenses.length" class="muted">Нет расходов за этот месяц.</p>
-      <div v-else>
+      <div v-else class="colchart-wrap">
         <div class="colchart" :style="{gridTemplateColumns: 'repeat(' + dailyBars.length + ', 1fr)'}">
-          <div class="colchart-slot" v-for="b in dailyBars" :key="b.day"
-               :title="b.day + '.' + month.slice(5) + ' — ' + fmt(b.total) + ' ₽'">
+          <div class="colchart-grid" v-for="g in dailyGrid" :key="g.pct" :style="{bottom: g.pct + '%'}">
+            <span>{{ fmt(g.value) }} ₽</span>
+          </div>
+          <div class="colchart-slot" v-for="b in dailyBars" :key="b.day" :title="b.title">
             <div v-if="b.isMax" class="colchart-peak">{{ fmt(b.total) }}</div>
             <div class="colchart-bar" :style="{height: b.hpct + '%'}"></div>
           </div>

@@ -45,22 +45,43 @@ createApp({
     incomeDelta() {
       return this.pctDelta(this.summary?.totals.income, this.summary?.prev.totals.income);
     },
+    dailyTop() {
+      // Верхняя граница шкалы — «круглое» значение чуть выше максимума дня
+      if (!this.summary) return 1;
+      const max = Math.max(0, ...this.summary.daily_expenses.map((d) => Number(d.total)));
+      if (!max) return 1;
+      const pow = Math.pow(10, Math.floor(Math.log10(max)));
+      for (const mult of [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) {
+        if (mult * pow >= max) return mult * pow;
+      }
+      return max;
+    },
+    dailyGrid() {
+      if (this.dailyTop <= 1) return [];
+      return [
+        { value: this.dailyTop / 2, pct: 50 },
+        { value: this.dailyTop, pct: 100 },
+      ];
+    },
     dailyBars() {
       if (!this.summary) return [];
       const [y, m] = this.month.split("-").map(Number);
       const daysInMonth = new Date(y, m, 0).getDate();
       const byDay = {};
       for (const d of this.summary.daily_expenses) byDay[d.day] = Number(d.total);
-      const max = Math.max(1, ...Object.values(byDay));
+      const max = Math.max(0, ...Object.values(byDay));
       const bars = [];
       for (let day = 1; day <= daysInMonth; day++) {
         const total = byDay[day] || 0;
+        const date = new Date(y, m - 1, day);
         bars.push({
           day,
           total,
-          hpct: (total / max) * 100,
+          hpct: total > 0 ? Math.max((total / this.dailyTop) * 100, 2) : 0,
           isMax: total === max && total > 0,
           tick: day === 1 || day % 5 === 0,
+          title: date.toLocaleDateString("ru-RU", { weekday: "short", day: "numeric", month: "long" })
+            + " — " + this.fmt(total) + " ₽",
         });
       }
       return bars;

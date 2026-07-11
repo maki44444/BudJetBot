@@ -142,16 +142,32 @@ body {
 }
 
 /* ── Столбики по дням ── */
+.colchart-wrap { position: relative; padding-top: 18px; }
 .colchart {
+  position: relative;
   display: grid;
-  gap: 2px;                    /* surface gap между столбиками */
+  gap: 3px;
   align-items: end;
-  height: 120px;
-  border-bottom: 1px solid var(--grid);  /* базовая линия — hairline */
-  padding-top: 18px;           /* место под подпись максимума */
+  height: 150px;
+  border-bottom: 1px solid var(--baseline);
+}
+.colchart-grid {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--grid);   /* hairline, за столбиками */
+}
+.colchart-grid span {
+  position: absolute;
+  right: 0;
+  bottom: 2px;
+  font-size: 10px;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
 }
 .colchart-slot {
   position: relative;
+  z-index: 1;                  /* столбики поверх линий сетки */
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
@@ -159,22 +175,26 @@ body {
 }
 .colchart-bar {
   background: var(--series-1);
-  border-radius: 4px 4px 0 0;  /* скруглён конец данных, прямой у базовой линии */
+  border-radius: 6px 6px 0 0;  /* округлый конец данных, прямой у базовой линии */
+  margin: 0 15%;               /* воздух между столбиками */
   min-height: 0;
+  transition: height 0.25s, filter 0.15s;
 }
+.colchart-slot:hover .colchart-bar { filter: brightness(1.25); }
 .colchart-peak {
   position: absolute;
   top: -16px;
   left: 50%;
   transform: translateX(-50%);
   font-size: 11px;
+  font-weight: 600;
   color: var(--ink-2);
   white-space: nowrap;
 }
 .colchart-axis {
   display: grid;
-  gap: 2px;
-  margin-top: 3px;
+  gap: 3px;
+  margin-top: 4px;
 }
 .colchart-tick {
   text-align: center;
