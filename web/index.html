@@ -69,12 +69,19 @@
             <span>{{ fmt(g.value) }} ₽</span>
           </div>
           <div class="colchart-slot" v-for="b in dailyView.bars" :key="b.key" :title="b.title">
-            <div v-if="b.isMax" class="colchart-peak">{{ fmt(b.total) }}</div>
-            <div class="colchart-bar" :style="{height: b.hpct + '%'}"></div>
+            <div v-if="b.isMax" class="colchart-peak">{{ fmt(b.expense) }}</div>
+            <div class="colchart-pair">
+              <div class="colchart-bar bar-expense" :style="{height: b.hExp + '%'}"></div>
+              <div class="colchart-bar bar-income" :style="{height: b.hInc + '%'}"></div>
+            </div>
           </div>
         </div>
         <div class="colchart-axis" :style="{gridTemplateColumns: 'repeat(' + dailyView.bars.length + ', 1fr)'}">
           <span v-for="b in dailyView.bars" :key="b.key" class="colchart-tick">{{ b.tickLabel }}</span>
+        </div>
+        <div class="legend">
+          <span><i class="legend-dot dot-expense"></i>Расходы</span>
+          <span><i class="legend-dot dot-income"></i>Доходы</span>
         </div>
       </div>
     </div>

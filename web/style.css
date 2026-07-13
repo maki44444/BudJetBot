@@ -7,7 +7,8 @@
   --ink-muted: #898781;
   --grid: #e1e0d9;
   --border: rgba(11, 11, 11, 0.10);
-  --series-1: #2a78d6;        /* категориальный слот 1 (синий) */
+  --series-1: #2a78d6;        /* категориальный слот 1 (синий) — расходы */
+  --series-2: #1baf7a;        /* категориальный слот 2 (аква) — доходы */
   --series-track: #cde2fb;    /* светлая ступень того же синего */
   --good-text: #006300;
   --warning: #fab219;
@@ -25,6 +26,7 @@
     --grid: #2c2c2a;
     --border: rgba(255, 255, 255, 0.10);
     --series-1: #3987e5;
+    --series-2: #199e70;
     --series-track: #104281;
     --good-text: #0ca30c;
     --warning-track: #45350f;
@@ -201,14 +203,39 @@ body {
   justify-content: flex-end;
   height: 100%;
 }
+.colchart-pair {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;                    /* surface gap между парными столбиками */
+  height: 100%;
+  margin: 0 12%;
+}
 .colchart-bar {
-  background: var(--series-1);
+  flex: 1;
   border-radius: 6px 6px 0 0;  /* округлый конец данных, прямой у базовой линии */
-  margin: 0 15%;               /* воздух между столбиками */
   min-height: 0;
   transition: height 0.25s, filter 0.15s;
 }
+.bar-expense { background: var(--series-1); }
+.bar-income { background: var(--series-2); }
 .colchart-slot:hover .colchart-bar { filter: brightness(1.25); }
+
+.legend {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.legend span { display: flex; align-items: center; gap: 5px; }
+.legend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.dot-expense { background: var(--series-1); }
+.dot-income { background: var(--series-2); }
 .colchart-peak {
   position: absolute;
   top: -16px;

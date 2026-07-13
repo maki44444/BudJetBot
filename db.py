@@ -434,19 +434,22 @@ async def set_transaction_oneoff(telegram_id: int, transaction_id: int, is_oneof
         return result != "UPDATE 0"
 
 
-async def get_daily_expenses(telegram_id: int, start: datetime, end: datetime) -> list[dict]:
-    """Сумма расходов по дням (дата в московском времени)."""
+async def get_daily_totals(telegram_id: int, start: datetime, end: datetime) -> list[dict]:
+    """Расходы и доходы по дням (дата в московском времени)."""
     async with _pool.acquire() as conn:
         rows = await conn.fetch("""
             SELECT (occurred_at AT TIME ZONE 'Europe/Moscow')::date AS day,
-                   SUM(amount) AS total
+                   COALESCE(SUM(amount) FILTER (WHERE type = 'expense'), 0) AS expense,
+                   COALESCE(SUM(amount) FILTER (WHERE type = 'income'), 0) AS income
             FROM transactions
-            WHERE telegram_id = $1 AND type = 'expense'
-              AND occurred_at >= $2 AND occurred_at < $3
+            WHERE telegram_id = $1 AND occurred_at >= $2 AND occurred_at < $3
             GROUP BY day
             ORDER BY day
         """, telegram_id, start, end)
-        return [{"date": r["day"].isoformat(), "total": r["total"]} for r in rows]
+        return [
+            {"date": r["day"].isoformat(), "expense": r["expense"], "income": r["income"]}
+            for r in rows
+        ]
 
 
 async def get_top_expenses(telegram_id: int, start: datetime, end: datetime, limit: int = 5) -> list[dict]:

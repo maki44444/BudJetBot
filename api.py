@@ -132,7 +132,7 @@ async def api_summary(month: str | None = None, uid: int = Depends(get_current_u
     prev_totals = await db.get_totals(uid, prev_start, prev_end)
     prev_expense = await db.get_category_breakdown(uid, prev_start, prev_end, "expense")
     top_expenses = await db.get_top_expenses(uid, start, end, 5)
-    daily_expenses = await db.get_daily_expenses(uid, start, end)
+    daily_expenses = await db.get_daily_totals(uid, start, end)
 
     # Прогноз до конца месяца — только для текущего месяца.
     # Разовые траты не экстраполируются: прогноз = темп обычных трат × дни + разовые как есть.
@@ -172,7 +172,7 @@ async def api_daily(days: int = Query(7, ge=1, le=90), uid: int = Depends(get_cu
     now = datetime.now(MOSCOW)
     end = MOSCOW.localize(datetime(now.year, now.month, now.day)) + timedelta(days=1)
     start = end - timedelta(days=days)
-    return {"items": await db.get_daily_expenses(uid, start, end)}
+    return {"items": await db.get_daily_totals(uid, start, end)}
 
 
 @app.get("/api/transactions")

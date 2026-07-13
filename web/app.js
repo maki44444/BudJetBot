@@ -68,15 +68,16 @@ createApp({
     dailyView() {
       const items = this.chartDays ? this.dailyExtra : (this.summary ? this.summary.daily_expenses : []);
       const byDate = {};
-      for (const it of items) byDate[it.date] = Number(it.total);
+      for (const it of items) byDate[it.date] = { expense: Number(it.expense), income: Number(it.income) };
       const dates = this.chartDates;
-      const totals = dates.map((d) => byDate[d] || 0);
-      const max = Math.max(0, ...totals);
-      const top = this.niceCeil(max);
-      const bars = dates.map((iso, i) => {
+      const maxExpense = Math.max(0, ...dates.map((d) => byDate[d]?.expense || 0));
+      const maxAny = Math.max(maxExpense, ...dates.map((d) => byDate[d]?.income || 0));
+      const top = this.niceCeil(maxAny);
+      const hpct = (v) => (v > 0 ? Math.max((v / top) * 100, 2) : 0);
+      const bars = dates.map((iso) => {
         const [y, m, d] = iso.split("-").map(Number);
         const date = new Date(y, m - 1, d);
-        const total = totals[i];
+        const { expense = 0, income = 0 } = byDate[iso] || {};
         let tickLabel = "";
         if (this.chartDays === 7) {
           tickLabel = date.toLocaleDateString("ru-RU", { weekday: "short" });
@@ -85,19 +86,23 @@ createApp({
         } else if (d === 1 || d % 5 === 0) {
           tickLabel = String(d);
         }
+        let title = date.toLocaleDateString("ru-RU", { weekday: "short", day: "numeric", month: "long" })
+          + " — расходы " + this.fmt(expense) + " ₽";
+        if (income > 0) title += ", доходы " + this.fmt(income) + " ₽";
         return {
           key: iso,
-          total,
-          hpct: total > 0 ? Math.max((total / top) * 100, 2) : 0,
-          isMax: total === max && total > 0,
+          expense,
+          income,
+          hExp: hpct(expense),
+          hInc: hpct(income),
+          isMax: expense === maxExpense && expense > 0,
           tickLabel,
-          title: date.toLocaleDateString("ru-RU", { weekday: "short", day: "numeric", month: "long" })
-            + " — " + this.fmt(total) + " ₽",
+          title,
         };
       });
       return {
         bars,
-        hasData: max > 0,
+        hasData: maxAny > 0,
         grid: top > 1 ? [{ value: top / 2, pct: 50 }, { value: top, pct: 100 }] : [],
       };
     },
