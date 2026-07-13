@@ -64,29 +64,35 @@ async def auth_logout():
 
 # ── Страницы и статика ────────────────────────────────────────────────────────
 
+# no-cache = браузер сверяет версию с сервером на каждый запрос (304, если не менялось).
+# Без этого после деплоя браузер может держать старый app.js при новом index.html —
+# и Vue падает в пустую страницу из-за рассинхрона.
+_NO_CACHE = {"Cache-Control": "no-cache"}
+
+
 @app.get("/")
 async def index(request: Request):
     uid = auth.read_session(request.cookies.get("session"))
     if uid is None:
         return RedirectResponse("/login", status_code=302)
-    return FileResponse(WEB_DIR / "index.html")
+    return FileResponse(WEB_DIR / "index.html", headers=_NO_CACHE)
 
 
 @app.get("/login")
 async def login_page():
     html = (WEB_DIR / "login.html").read_text(encoding="utf-8")
     html = html.replace("__BOT_USERNAME__", BOT_USERNAME)
-    return HTMLResponse(html)
+    return HTMLResponse(html, headers=_NO_CACHE)
 
 
 @app.get("/app.js")
 async def app_js():
-    return FileResponse(WEB_DIR / "app.js", media_type="application/javascript")
+    return FileResponse(WEB_DIR / "app.js", media_type="application/javascript", headers=_NO_CACHE)
 
 
 @app.get("/style.css")
 async def style_css():
-    return FileResponse(WEB_DIR / "style.css", media_type="text/css")
+    return FileResponse(WEB_DIR / "style.css", media_type="text/css", headers=_NO_CACHE)
 
 
 # ── Периоды ───────────────────────────────────────────────────────────────────
