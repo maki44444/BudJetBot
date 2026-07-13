@@ -302,6 +302,33 @@ select, input[type="number"] {
 .limit-edit { display: flex; gap: 6px; justify-content: flex-end; }
 .limit-edit input { width: 110px; }
 
+.tx-oneoff { width: 36px; text-align: right; }
+.oneoff-btn { opacity: 0.35; }
+.oneoff-btn.active {
+  opacity: 1;
+  background: var(--warning-track);
+  border-color: var(--warning);
+}
+
+/* ── Настройки ── */
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-top: 1px solid var(--grid);
+}
+.setting-row:first-of-type { border-top: none; }
+.setting-desc { flex: 1; }
+.switch-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 /* Перезагрузка данных: держим прежний рендер полупрозрачным, без скачков */
 .stale { opacity: 0.6; transition: opacity 0.15s; }
 

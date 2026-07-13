@@ -128,16 +128,19 @@ async def api_summary(month: str | None = None, uid: int = Depends(get_current_u
     top_expenses = await db.get_top_expenses(uid, start, end, 5)
     daily_expenses = await db.get_daily_expenses(uid, start, end)
 
-    # Прогноз до конца месяца — только для текущего месяца
+    # Прогноз до конца месяца — только для текущего месяца.
+    # Разовые траты не экстраполируются: прогноз = темп обычных трат × дни + разовые как есть.
     now = datetime.now(MOSCOW)
     forecast = None
     if (start.year, start.month) == (now.year, now.month) and totals["expense"]:
         days_in_month = (end - start).days
         days_elapsed = now.day
+        oneoff = float(totals["expense_oneoff"])
+        regular = float(totals["expense"]) - oneoff
         forecast = {
             "days_elapsed": days_elapsed,
             "days_in_month": days_in_month,
-            "expense_forecast": float(totals["expense"]) / days_elapsed * days_in_month,
+            "expense_forecast": regular / days_elapsed * days_in_month + oneoff,
         }
 
     return {
@@ -180,17 +183,23 @@ async def api_transactions(
 
 
 class TxPatch(BaseModel):
-    category_id: int
+    category_id: int | None = None
+    is_oneoff: bool | None = None
 
 
 @app.patch("/api/transactions/{tx_id}")
 async def api_update_transaction(tx_id: int, body: TxPatch, uid: int = Depends(get_current_user)):
-    category = await db.get_category(body.category_id)
-    if category is None or (category["telegram_id"] not in (None, uid)):
-        raise HTTPException(status_code=400, detail="Категория не найдена")
-    updated = await db.update_transaction_category(uid, tx_id, body.category_id)
-    if not updated:
-        raise HTTPException(status_code=404, detail="Запись не найдена")
+    if body.category_id is None and body.is_oneoff is None:
+        raise HTTPException(status_code=400, detail="Нечего менять")
+    if body.category_id is not None:
+        category = await db.get_category(body.category_id)
+        if category is None or (category["telegram_id"] not in (None, uid)):
+            raise HTTPException(status_code=400, detail="Категория не найдена")
+        if not await db.update_transaction_category(uid, tx_id, body.category_id):
+            raise HTTPException(status_code=404, detail="Запись не найдена")
+    if body.is_oneoff is not None:
+        if not await db.set_transaction_oneoff(uid, tx_id, body.is_oneoff):
+            raise HTTPException(status_code=404, detail="Запись не найдена")
     return {"ok": True}
 
 
@@ -208,6 +217,30 @@ async def api_categories(uid: int = Depends(get_current_user)):
         "expense": await db.get_categories(uid, "expense"),
         "income": await db.get_categories(uid, "income"),
     }
+
+
+@app.get("/api/settings")
+async def api_get_settings(uid: int = Depends(get_current_user)):
+    return await db.get_user_settings(uid)
+
+
+class SettingsPatch(BaseModel):
+    oneoff_threshold: float | None = None
+    reminder_enabled: bool | None = None
+
+
+@app.patch("/api/settings")
+async def api_patch_settings(body: SettingsPatch, uid: int = Depends(get_current_user)):
+    if body.oneoff_threshold is None and body.reminder_enabled is None:
+        raise HTTPException(status_code=400, detail="Нечего менять")
+    if body.oneoff_threshold is not None and body.oneoff_threshold <= 0:
+        raise HTTPException(status_code=400, detail="Порог должен быть больше нуля")
+    await db.update_user_settings(
+        uid,
+        oneoff_threshold=Decimal(str(body.oneoff_threshold)) if body.oneoff_threshold is not None else None,
+        reminder_enabled=body.reminder_enabled,
+    )
+    return {"ok": True}
 
 
 class LimitBody(BaseModel):

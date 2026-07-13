@@ -118,6 +118,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("users", admin.cmd_users, filters=private))
 
     app.add_handler(CallbackQueryHandler(transactions.handle_category_choice, pattern=r"^cat:"))
+    app.add_handler(CallbackQueryHandler(transactions.handle_oneoff, pattern=r"^oneoff:"))
     app.add_handler(CallbackQueryHandler(transactions.handle_delete_request, pattern=r"^delq:"))
     app.add_handler(CallbackQueryHandler(transactions.handle_undo_confirm, pattern=r"^undo:"))
     app.add_handler(CallbackQueryHandler(transactions.handle_cancel, pattern=r"^cancel$"))

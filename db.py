@@ -104,6 +104,13 @@ async def _create_tables() -> None:
             CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_import_hash
             ON transactions(telegram_id, import_hash) WHERE import_hash IS NOT NULL
         """)
+        # Миграции: добавляем колонки если их ещё нет
+        await conn.execute(
+            "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS is_oneoff BOOLEAN NOT NULL DEFAULT FALSE"
+        )
+        await conn.execute(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS oneoff_threshold NUMERIC(12,2) NOT NULL DEFAULT 10000"
+        )
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS budgets (
                 id          SERIAL PRIMARY KEY,
@@ -198,6 +205,35 @@ async def get_user_by_username(username: str) -> int | None:
             "SELECT telegram_id FROM users WHERE LOWER(username) = LOWER($1)", username
         )
         return row["telegram_id"] if row else None
+
+
+async def get_user_settings(telegram_id: int) -> dict:
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT oneoff_threshold, reminder_enabled, reminder_hour
+            FROM users WHERE telegram_id = $1
+        """, telegram_id)
+        if not row:
+            return {"oneoff_threshold": 10000, "reminder_enabled": True, "reminder_hour": 21}
+        return dict(row)
+
+
+async def update_user_settings(
+    telegram_id: int,
+    oneoff_threshold=None,
+    reminder_enabled: bool | None = None,
+) -> None:
+    async with _pool.acquire() as conn:
+        if oneoff_threshold is not None:
+            await conn.execute(
+                "UPDATE users SET oneoff_threshold = $1 WHERE telegram_id = $2",
+                oneoff_threshold, telegram_id,
+            )
+        if reminder_enabled is not None:
+            await conn.execute(
+                "UPDATE users SET reminder_enabled = $1 WHERE telegram_id = $2",
+                reminder_enabled, telegram_id,
+            )
 
 
 async def get_reminder_candidates() -> list[int]:
@@ -370,7 +406,7 @@ async def get_transactions_page(
         args += [limit, offset]
         rows = await conn.fetch(f"""
             SELECT t.id, t.type, t.amount, t.description, t.occurred_at, t.source,
-                   t.category_id, c.name AS category_name, c.icon AS category_icon
+                   t.is_oneoff, t.category_id, c.name AS category_name, c.icon AS category_icon
             FROM transactions t
             LEFT JOIN categories c ON c.id = t.category_id
             WHERE {where}
@@ -386,6 +422,15 @@ async def update_transaction_category(telegram_id: int, transaction_id: int, cat
             UPDATE transactions SET category_id = $3
             WHERE id = $1 AND telegram_id = $2
         """, transaction_id, telegram_id, category_id)
+        return result != "UPDATE 0"
+
+
+async def set_transaction_oneoff(telegram_id: int, transaction_id: int, is_oneoff: bool) -> bool:
+    async with _pool.acquire() as conn:
+        result = await conn.execute("""
+            UPDATE transactions SET is_oneoff = $3
+            WHERE id = $1 AND telegram_id = $2
+        """, transaction_id, telegram_id, is_oneoff)
         return result != "UPDATE 0"
 
 
@@ -408,7 +453,7 @@ async def get_top_expenses(telegram_id: int, start: datetime, end: datetime, lim
     """Крупнейшие траты за период."""
     async with _pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT t.id, t.amount, t.description, t.occurred_at,
+            SELECT t.id, t.amount, t.description, t.occurred_at, t.is_oneoff,
                    c.name AS category_name, c.icon AS category_icon
             FROM transactions t
             LEFT JOIN categories c ON c.id = t.category_id
@@ -426,11 +471,16 @@ async def get_totals(telegram_id: int, start: datetime, end: datetime) -> dict:
         row = await conn.fetchrow("""
             SELECT
                 COALESCE(SUM(amount) FILTER (WHERE type = 'expense'), 0) AS expense,
-                COALESCE(SUM(amount) FILTER (WHERE type = 'income'), 0) AS income
+                COALESCE(SUM(amount) FILTER (WHERE type = 'income'), 0) AS income,
+                COALESCE(SUM(amount) FILTER (WHERE type = 'expense' AND is_oneoff), 0) AS expense_oneoff
             FROM transactions
             WHERE telegram_id = $1 AND occurred_at >= $2 AND occurred_at < $3
         """, telegram_id, start, end)
-        return {"expense": row["expense"], "income": row["income"]}
+        return {
+            "expense": row["expense"],
+            "income": row["income"],
+            "expense_oneoff": row["expense_oneoff"],
+        }
 
 
 # ---------- budgets ----------
@@ -458,7 +508,8 @@ async def get_budget_progress(telegram_id: int, start: datetime, end: datetime) 
     async with _pool.acquire() as conn:
         rows = await conn.fetch("""
             SELECT c.id AS category_id, c.name, c.icon, b.amount AS budget,
-                   COALESCE(SUM(t.amount), 0) AS spent
+                   COALESCE(SUM(t.amount), 0) AS spent,
+                   COALESCE(SUM(t.amount) FILTER (WHERE t.is_oneoff), 0) AS spent_oneoff
             FROM budgets b
             JOIN categories c ON c.id = b.category_id
             LEFT JOIN transactions t ON t.category_id = b.category_id

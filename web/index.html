@@ -24,6 +24,7 @@
     <button :class="{active: tab==='dashboard'}" @click="tab='dashboard'">Дашборд</button>
     <button :class="{active: tab==='history'}" @click="tab='history'">История</button>
     <button :class="{active: tab==='limits'}" @click="tab='limits'">Лимиты</button>
+    <button :class="{active: tab==='settings'}" @click="tab='settings'">⚙️</button>
   </nav>
 
   <!-- ДАШБОРД -->
@@ -103,7 +104,7 @@
               {{ t.category_icon }} {{ t.category_name }}
               <span v-if="t.description" class="muted small">· {{ t.description }}</span>
             </td>
-            <td class="tx-amount">−{{ fmt(t.amount) }} ₽</td>
+            <td class="tx-amount"><span v-if="t.is_oneoff" title="Разовая — не в прогнозе">⚡</span> −{{ fmt(t.amount) }} ₽</td>
           </tr>
         </tbody>
       </table>
@@ -163,6 +164,12 @@
             <td class="tx-amount" :class="{'delta-good': t.type==='income'}">
               {{ t.type==='income' ? '+' : '−' }}{{ fmt(t.amount) }} ₽
             </td>
+            <td class="tx-oneoff" v-if="t.type==='expense'">
+              <button class="icon-btn oneoff-btn" :class="{active: t.is_oneoff}"
+                      @click="toggleOneoff(t)"
+                      :title="t.is_oneoff ? 'Разовая — не учитывается в прогнозе' : 'Пометить как разовую'">⚡</button>
+            </td>
+            <td class="tx-oneoff" v-else></td>
             <td class="tx-del">
               <button class="icon-btn" @click="removeTx(t)" aria-label="Удалить запись">✕</button>
             </td>
@@ -172,6 +179,37 @@
       <button v-if="tx.items.length < tx.total" class="ghost-btn wide" @click="loadMoreTx">
         Показать ещё
       </button>
+    </div>
+  </section>
+
+  <!-- НАСТРОЙКИ -->
+  <section v-if="tab==='settings'">
+    <div class="card">
+      <h3>Настройки</h3>
+      <div class="setting-row">
+        <div class="setting-desc">
+          <div>Порог «разовой» траты</div>
+          <div class="muted small">
+            От этой суммы бот предложит пометить трату как разовую.
+            Разовые траты учитываются в итогах, но не раздувают прогноз на месяц.
+          </div>
+        </div>
+        <div class="limit-edit">
+          <input type="number" min="1" step="500" v-model.number="settings.oneoff_threshold">
+          <button class="ghost-btn" @click="saveSettings({oneoff_threshold: settings.oneoff_threshold})">Сохранить</button>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-desc">
+          <div>Вечернее напоминание</div>
+          <div class="muted small">Если за день не внесено ни одной записи, бот напомнит вечером.</div>
+        </div>
+        <label class="switch-label">
+          <input type="checkbox" v-model="settings.reminder_enabled"
+                 @change="saveSettings({reminder_enabled: settings.reminder_enabled})">
+          {{ settings.reminder_enabled ? 'Вкл' : 'Выкл' }}
+        </label>
+      </div>
     </div>
   </section>
 

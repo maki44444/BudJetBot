@@ -22,6 +22,7 @@ createApp({
       filterCategory: null,
       categories: { expense: [], income: [] },
       limitDrafts: {},
+      settings: { oneoff_threshold: null, reminder_enabled: true },
       loading: false,
       chartDays: null,      // null = месяц, 7 или 14 = скользящее окно от сегодня
       dailyExtra: [],       // данные для окон 7/14 дней (грузятся отдельно)
@@ -189,6 +190,30 @@ createApp({
     async loadCategories() {
       this.categories = await this.api("/api/categories");
     },
+    async loadSettings() {
+      this.settings = await this.api("/api/settings");
+    },
+    async saveSettings(patch) {
+      if (patch.oneoff_threshold !== undefined
+          && (!patch.oneoff_threshold || patch.oneoff_threshold <= 0)) {
+        alert("Порог должен быть больше нуля");
+        return;
+      }
+      await this.api("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+    },
+    async toggleOneoff(t) {
+      await this.api(`/api/transactions/${t.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_oneoff: !t.is_oneoff }),
+      });
+      t.is_oneoff = !t.is_oneoff;
+      await this.loadSummary();  // прогноз пересчитывается
+    },
     async loadTx(append = false) {
       const params = new URLSearchParams({
         month: this.month,
@@ -273,7 +298,9 @@ createApp({
   async mounted() {
     this.loading = true;
     try {
-      await Promise.all([this.loadSummary(), this.loadCategories(), this.reloadTx()]);
+      await Promise.all([
+        this.loadSummary(), this.loadCategories(), this.reloadTx(), this.loadSettings(),
+      ]);
     } finally {
       this.loading = false;
     }

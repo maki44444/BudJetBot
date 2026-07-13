@@ -2,7 +2,7 @@ import re
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 import db
@@ -105,13 +105,21 @@ async def handle_category_choice(update: Update, context: ContextTypes.DEFAULT_T
         )
     else:
         occurred_at = datetime.now(common.MOSCOW)
-    await db.add_transaction(
+    tx_id = await db.add_transaction(
         uid, category_id, pending["type"], pending["amount"], pending["description"], occurred_at,
     )
     sign = "+" if pending["type"] == "income" else "-"
     date_note = f" ({occurred_date.strftime('%d.%m.%Y')})" if occurred_date else ""
+    markup = None
+    if pending["type"] == "expense":
+        settings = await db.get_user_settings(uid)
+        if pending["amount"] >= settings["oneoff_threshold"]:
+            markup = InlineKeyboardMarkup([[InlineKeyboardButton(
+                "⚡ Разовая — не учитывать в прогнозе", callback_data=f"oneoff:{tx_id}",
+            )]])
     await query.edit_message_text(
-        f"✅ {sign}{common.fmt_amount(pending['amount'])}₽ — {category['icon']} {category['name']}{date_note}"
+        f"✅ {sign}{common.fmt_amount(pending['amount'])}₽ — {category['icon']} {category['name']}{date_note}",
+        reply_markup=markup,
     )
 
 
@@ -245,6 +253,20 @@ async def handle_undo_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE
     uid = update.effective_user.id
     deleted = await db.delete_transaction(uid, tx_id)
     await query.edit_message_text("Запись удалена." if deleted else "Уже удалено или не найдено.")
+
+
+async def handle_oneoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    tx_id = int(query.data.split(":", 1)[1])
+    uid = update.effective_user.id
+    marked = await db.set_transaction_oneoff(uid, tx_id, True)
+    if not marked:
+        await query.edit_message_text(query.message.text + "\nЗапись не найдена — возможно, удалена.")
+        return
+    await query.edit_message_text(
+        query.message.text + "\n⚡ Помечена как разовая — не учитывается в прогнозе"
+    )
 
 
 async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
