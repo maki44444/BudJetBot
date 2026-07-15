@@ -49,7 +49,8 @@ HELP_TEXT = (
     "  За месяц — разбивка по категориям + лимиты\n"
     "  Категории — список категорий\n"
     "  Лимиты — прогресс по лимитам\n"
-    "  Отменить последнюю — удалить последнюю ручную запись\n\n"
+    "  Отменить последнюю — удалить последнюю ручную запись\n"
+    "  Сайт — подробная аналитика в браузере\n\n"
     "Быстрый ввод:\n"
     "  350 такси — расход 350₽ с описанием «такси»\n"
     "  +50000 зарплата — доход 50000₽\n"
@@ -91,6 +92,11 @@ async def route_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await transactions.cmd_undo(update, context)
     elif text == "Помощь":
         await update.message.reply_text(HELP_TEXT, reply_markup=keyboards.main_keyboard())
+    elif text == "Сайт" and SITE_URL:
+        await update.message.reply_text(
+            "Подробная аналитика: графики, история, лимиты и настройки:",
+            reply_markup=keyboards.site_keyboard(),
+        )
     else:
         handled = await transactions.handle_quick_entry(update, context)
         if not handled:

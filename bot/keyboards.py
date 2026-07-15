@@ -1,4 +1,8 @@
+import os
+
 from telegram import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
+
+SITE_URL = os.environ.get("SITE_URL", "")
 
 
 def main_keyboard() -> ReplyKeyboardMarkup:
@@ -6,9 +10,18 @@ def main_keyboard() -> ReplyKeyboardMarkup:
         ["Сегодня", "За месяц"],
         ["Категории", "Лимиты"],
         ["Отменить последнюю"],
-        ["Помощь"],
+        ["Помощь", "Сайт"] if SITE_URL else ["Помощь"],
     ]
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
+
+
+def site_keyboard() -> InlineKeyboardMarkup | None:
+    """Инлайн-кнопка на сайт с подробной аналитикой; None, если SITE_URL не задан."""
+    if not SITE_URL:
+        return None
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("📊 Подробнее на сайте", url=SITE_URL)
+    ]])
 
 
 def category_keyboard(categories: list[dict], columns: int = 2) -> InlineKeyboardMarkup:
@@ -21,7 +34,7 @@ def category_keyboard(categories: list[dict], columns: int = 2) -> InlineKeyboar
 
 
 def day_delete_keyboard(txs: list[dict], fmt_amount) -> InlineKeyboardMarkup:
-    """Кнопка удаления на каждую запись дня."""
+    """Кнопка удаления на каждую запись дня + ссылка на сайт."""
     rows = []
     for t in txs:
         sign = "+" if t["type"] == "income" else "-"
@@ -32,6 +45,8 @@ def day_delete_keyboard(txs: list[dict], fmt_amount) -> InlineKeyboardMarkup:
             f"❌ {sign}{fmt_amount(t['amount'])}₽ {label}",
             callback_data=f"delq:{t['id']}",
         )])
+    if SITE_URL:
+        rows.append([InlineKeyboardButton("📊 Подробнее на сайте", url=SITE_URL)])
     return InlineKeyboardMarkup(rows)
 
 

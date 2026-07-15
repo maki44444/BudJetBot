@@ -204,7 +204,10 @@ async def cmd_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"  {marker} {p['icon']} {p['name']}: "
                 f"{common.fmt_amount(p['spent'])} / {common.fmt_amount(p['budget'])}₽ ({pct}%)"
             )
-    await update.message.reply_text("\n".join(lines), reply_markup=keyboards.main_keyboard())
+    await update.message.reply_text(
+        "\n".join(lines),
+        reply_markup=keyboards.site_keyboard() or keyboards.main_keyboard(),
+    )
 
 
 async def cmd_undo(update: Update, context: ContextTypes.DEFAULT_TYPE):
