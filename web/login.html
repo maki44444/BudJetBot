@@ -11,16 +11,60 @@
 </head>
 <body>
 <div class="login-page">
-  <div class="login-card">
-    <h1>💰 Бюджет</h1>
-    <p>Личный трекер расходов и доходов.<br>Войди через Telegram — тот же аккаунт, что и в боте.</p>
-    <div id="tg-login"></div>
-    <p class="muted small">Доступ только по whitelist — если бот тебя не знает, попроси доступ у администратора.</p>
+  <div class="login-shell">
+
+    <div class="login-info">
+      <div class="login-brand">Бюджет</div>
+      <p class="login-tagline">Личный трекер расходов и доходов</p>
+      <ul class="login-points">
+        <li>
+          <b>Быстрый ввод в Telegram.</b>
+          Написал боту «350 такси» — запись готова. Вечером напомнит, если день пустой.
+        </li>
+        <li>
+          <b>Аналитика.</b>
+          Графики по дням, разбивка по категориям, сравнение месяцев и прогноз трат.
+        </li>
+        <li>
+          <b>Умные лимиты.</b>
+          Подбираются по твоим тратам, пересчитываются раз в месяц и предупреждают о перерасходе заранее.
+        </li>
+      </ul>
+      <div class="login-mini" aria-hidden="true">
+        <div class="login-mini-head">
+          <span class="login-mini-label">Расходы по дням</span>
+          <span class="login-mini-label">Июль</span>
+        </div>
+        <div class="login-mini-bars">
+          <i style="height:52%"></i><i style="height:38%"></i><i style="height:64%"></i>
+          <i style="height:22%"></i><i style="height:45%"></i><i class="inc" style="height:84%"></i>
+          <i style="height:30%"></i><i style="height:57%"></i><i style="height:18%"></i>
+          <i style="height:41%"></i><i class="inc" style="height:70%"></i><i style="height:26%"></i>
+        </div>
+      </div>
+    </div>
+
+    <div class="login-card">
+      <div class="login-card-label">Вход</div>
+      <p class="login-lead">
+        Через Telegram — тот же аккаунт, что и в боте.
+        Без пароля, без регистрации, без почты.
+      </p>
+      <div id="tg-login"></div>
+      <p class="muted small">
+        Это официальный виджет Telegram: приложение получает только имя и ID аккаунта —
+        не переписку и не контакты.
+      </p>
+      <div class="login-foot">
+        <span class="muted small">Доступ по приглашению.</span>
+        <a class="small" href="https://t.me/__BOT_USERNAME__" target="_blank" rel="noopener">Открыть бота →</a>
+      </div>
+    </div>
+
   </div>
 </div>
 <script>
-  // Callback-режим надёжнее redirect-режима (data-auth-url): переход на бэкенд
-  // делаем сами, когда виджет отдал данные авторизации
+  // Виджет вставляется динамически: data-auth-url собирается от текущего origin
   window.onTelegramAuth = function (user) {
     location.href = "/auth/telegram?" + new URLSearchParams(user).toString();
   };
@@ -29,6 +73,8 @@
   s.src = "https://telegram.org/js/telegram-widget.js?22";
   s.setAttribute("data-telegram-login", "__BOT_USERNAME__");
   s.setAttribute("data-size", "large");
+  s.setAttribute("data-radius", "6");
+  s.setAttribute("data-userpic", "false");
   s.setAttribute("data-onauth", "onTelegramAuth(user)");
   s.setAttribute("data-request-access", "write");
   document.getElementById("tg-login").appendChild(s);
