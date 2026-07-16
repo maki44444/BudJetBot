@@ -8,7 +8,7 @@ from telegram.ext import (
     ContextTypes, filters,
 )
 
-from . import access, keyboards, common, transactions, categories, limits, limit_alerts, reminders, admin
+from . import access, keyboards, common, transactions, categories, limits, limit_alerts, auto_limits, reminders, admin
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 SITE_URL = os.environ.get("SITE_URL", "")
@@ -139,7 +139,11 @@ def build_app() -> Application:
     app.job_queue.run_daily(
         limit_alerts.check_limits, time=dtime(12, 0, 0, tzinfo=common.MOSCOW)
     )
+    app.job_queue.run_monthly(
+        auto_limits.recalc_auto_limits, when=dtime(9, 0, 0, tzinfo=common.MOSCOW), day=1
+    )
     logger.info(
-        "Bot configured, evening reminder at %02d:00 MSK, limit check at 12:00 MSK", REMINDER_HOUR
+        "Bot configured, evening reminder at %02d:00 MSK, limit check at 12:00 MSK, "
+        "auto-limits recalc on 1st at 09:00 MSK", REMINDER_HOUR
     )
     return app

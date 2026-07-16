@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 import auth
 import db
+import smartlimits
 
 logger = logging.getLogger(__name__)
 
@@ -264,5 +265,58 @@ async def api_set_limit(body: LimitBody, uid: int = Depends(get_current_user)):
     if body.amount == 0:
         await db.delete_budget(uid, body.category_id)
     else:
-        await db.set_budget(uid, body.category_id, Decimal(str(body.amount)))
+        # ручное изменение всегда переводит лимит в ручной режим
+        await db.set_budget(uid, body.category_id, Decimal(str(body.amount)), mode="manual")
+    return {"ok": True}
+
+
+@app.get("/api/limits/suggest")
+async def api_suggest_limits(uid: int = Depends(get_current_user)):
+    rates = await db.get_spend_rates(uid)
+    tracking_days = await db.get_tracking_days(uid)
+    suggestions = smartlimits.suggest_limits(rates)
+    current = {b["category_id"]: b for b in await db.get_budgets(uid)}
+    items = []
+    for s in suggestions:
+        cur = current.get(s["category_id"])
+        items.append({
+            "category_id": s["category_id"],
+            "name": s["name"],
+            "icon": s["icon"],
+            "suggested": s["suggested"],
+            "current": float(cur["amount"]) if cur else None,
+            "mode": cur["mode"] if cur else None,
+        })
+    return {"items": items, "tracking_days": int(tracking_days)}
+
+
+class ApplyLimitsBody(BaseModel):
+    items: list[LimitBody]
+
+
+@app.post("/api/limits/apply")
+async def api_apply_limits(body: ApplyLimitsBody, uid: int = Depends(get_current_user)):
+    applied = 0
+    for item in body.items:
+        if item.amount <= 0:
+            continue
+        category = await db.get_category(item.category_id)
+        if category is None or (category["telegram_id"] not in (None, uid)):
+            continue
+        await db.set_budget(uid, item.category_id, Decimal(str(item.amount)), mode="auto")
+        applied += 1
+    return {"ok": True, "applied": applied}
+
+
+class LimitModeBody(BaseModel):
+    category_id: int
+    mode: str
+
+
+@app.patch("/api/limits")
+async def api_set_limit_mode(body: LimitModeBody, uid: int = Depends(get_current_user)):
+    if body.mode not in ("manual", "auto"):
+        raise HTTPException(status_code=400, detail="Режим: manual или auto")
+    if not await db.set_budget_mode(uid, body.category_id, body.mode):
+        raise HTTPException(status_code=404, detail="Лимит не найден")
     return {"ok": True}

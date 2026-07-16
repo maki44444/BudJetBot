@@ -231,14 +231,62 @@
 
   <!-- ЛИМИТЫ -->
   <section v-if="tab==='limits'" :class="{stale: loading}">
+    <div class="card" v-if="suggest">
+      <h3>Предложенные лимиты</h3>
+      <p class="muted small">
+        По твоему темпу трат за последние месяцы, без разовых ⚡.
+        Суммы можно поправить; галочка — включить лимит в режиме «авто».
+      </p>
+      <p v-if="suggestDays < 30" class="small delta-bad">
+        ⚠ Учёт ведётся всего {{ suggestDays }} дн. — оценки приблизительные.
+        1-го числа автолимиты сами подстроятся под накопившиеся данные.
+      </p>
+      <table class="limits-table">
+        <tbody>
+          <tr v-for="s in suggest" :key="s.category_id">
+            <td>
+              <label class="switch-label">
+                <input type="checkbox" v-model="s.checked">
+                {{ s.icon }} {{ s.name }}
+              </label>
+            </td>
+            <td class="muted small">{{ s.current !== null ? 'сейчас ' + fmt(s.current) + ' ₽' : 'лимита нет' }}</td>
+            <td class="limit-edit">
+              <input type="number" min="0" step="100" v-model.number="s.suggested">
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="btn-row">
+        <button class="ghost-btn" @click="applySuggest">Включить выбранные</button>
+        <button class="ghost-btn" @click="suggest = null">Отмена</button>
+      </div>
+    </div>
+
     <div class="card">
-      <h3>Месячные лимиты по категориям</h3>
-      <p class="muted small">Введи сумму и нажми «Сохранить». 0 — снять лимит.</p>
+      <div class="card-head">
+        <h3>Месячные лимиты по категориям</h3>
+        <button class="ghost-btn" @click="loadSuggest">Подобрать автоматически</button>
+      </div>
+      <p class="muted small">
+        Введи сумму и нажми «Сохранить» (0 — снять лимит). 🔄 авто — лимит
+        пересчитывается 1-го числа по твоим тратам (не быстрее ±10%); ✋ — закреплён вручную.
+        Ручное сохранение всегда закрепляет.
+      </p>
       <table class="limits-table">
         <tbody>
           <tr v-for="c in categories.expense" :key="c.id">
             <td>{{ c.icon }} {{ c.name }}</td>
-            <td class="muted">{{ currentLimit(c.id) !== null ? fmt(currentLimit(c.id)) + ' ₽' : '—' }}</td>
+            <td class="muted small">{{ currentLimit(c.id) !== null ? fmt(currentLimit(c.id)) + ' ₽' : '—' }}</td>
+            <td class="limit-mode">
+              <button v-if="budgetOf(c.id)" class="icon-btn"
+                      @click="toggleMode(c.id)"
+                      :title="budgetOf(c.id).mode === 'auto'
+                        ? 'Авто: пересчитывается 1-го числа. Нажми, чтобы закрепить'
+                        : 'Закреплён вручную. Нажми, чтобы включить авто'">
+                {{ budgetOf(c.id).mode === 'auto' ? '🔄' : '✋' }}
+              </button>
+            </td>
             <td class="limit-edit">
               <input type="number" min="0" step="100" v-model.number="limitDrafts[c.id]" placeholder="сумма">
               <button class="ghost-btn" @click="saveLimit(c.id)">Сохранить</button>

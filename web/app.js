@@ -23,6 +23,8 @@ createApp({
       categories: { expense: [], income: [] },
       limitDrafts: {},
       settings: { oneoff_threshold: null, reminder_enabled: true },
+      suggest: null,     // предпросмотр автоподбора лимитов
+      suggestDays: 0,    // сколько дней ведётся учёт (для предупреждения)
       theme: document.documentElement.dataset.theme || "light",
       loading: false,
       chartDays: null,      // null = месяц, 7 или 14 = скользящее окно от сегодня
@@ -169,10 +171,51 @@ createApp({
       const projPct = Math.round((projection / budget) * 100);
       return projPct > 100 ? projPct : null;
     },
-    currentLimit(categoryId) {
+    budgetOf(categoryId) {
       if (!this.summary) return null;
-      const b = this.summary.budgets.find((x) => x.category_id === categoryId);
+      return this.summary.budgets.find((x) => x.category_id === categoryId) || null;
+    },
+    currentLimit(categoryId) {
+      const b = this.budgetOf(categoryId);
       return b ? Number(b.budget) : null;
+    },
+    async loadSuggest() {
+      const data = await this.api("/api/limits/suggest");
+      if (!data.items.length) {
+        alert("Пока мало данных для подбора — веди учёт ещё немного.");
+        return;
+      }
+      this.suggestDays = data.tracking_days;
+      this.suggest = data.items.map((s) => ({ ...s, checked: true }));
+    },
+    async applySuggest() {
+      const items = this.suggest
+        .filter((s) => s.checked && s.suggested > 0)
+        .map((s) => ({ category_id: s.category_id, amount: Number(s.suggested) }));
+      if (!items.length) {
+        this.suggest = null;
+        return;
+      }
+      await this.api("/api/limits/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
+      });
+      this.suggest = null;
+      await this.loadSummary();
+    },
+    async toggleMode(categoryId) {
+      const b = this.budgetOf(categoryId);
+      if (!b) return;
+      await this.api("/api/limits", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category_id: categoryId,
+          mode: b.mode === "auto" ? "manual" : "auto",
+        }),
+      });
+      await this.loadSummary();
     },
 
     async api(path, options = {}) {

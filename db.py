@@ -112,6 +112,10 @@ async def _create_tables() -> None:
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS oneoff_threshold NUMERIC(12,2) NOT NULL DEFAULT 10000"
         )
         await conn.execute("""
+            ALTER TABLE budgets ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'manual'
+            CHECK (mode IN ('manual', 'auto'))
+        """)
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS budgets (
                 id          SERIAL PRIMARY KEY,
                 telegram_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
@@ -488,14 +492,71 @@ async def get_totals(telegram_id: int, start: datetime, end: datetime) -> dict:
 
 # ---------- budgets ----------
 
-async def set_budget(telegram_id: int, category_id: int, amount) -> None:
+async def set_budget(telegram_id: int, category_id: int, amount, mode: str = "manual") -> None:
     async with _pool.acquire() as conn:
         await conn.execute("""
-            INSERT INTO budgets (telegram_id, category_id, amount)
-            VALUES ($1, $2, $3)
+            INSERT INTO budgets (telegram_id, category_id, amount, mode)
+            VALUES ($1, $2, $3, $4)
             ON CONFLICT (telegram_id, category_id, period)
-            DO UPDATE SET amount = EXCLUDED.amount
-        """, telegram_id, category_id, amount)
+            DO UPDATE SET amount = EXCLUDED.amount, mode = EXCLUDED.mode
+        """, telegram_id, category_id, amount, mode)
+
+
+async def set_budget_mode(telegram_id: int, category_id: int, mode: str) -> bool:
+    async with _pool.acquire() as conn:
+        result = await conn.execute("""
+            UPDATE budgets SET mode = $3
+            WHERE telegram_id = $1 AND category_id = $2
+        """, telegram_id, category_id, mode)
+        return result != "UPDATE 0"
+
+
+async def get_budgets(telegram_id: int) -> list[dict]:
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT b.category_id, b.amount, b.mode, c.name, c.icon
+            FROM budgets b
+            JOIN categories c ON c.id = b.category_id
+            WHERE b.telegram_id = $1
+            ORDER BY c.name
+        """, telegram_id)
+        return [dict(r) for r in rows]
+
+
+async def get_tracking_days(telegram_id: int) -> float:
+    """Сколько дней ведётся учёт (от первой записи)."""
+    async with _pool.acquire() as conn:
+        span = await conn.fetchval("""
+            SELECT EXTRACT(EPOCH FROM (NOW() - MIN(occurred_at))) / 86400.0
+            FROM transactions WHERE telegram_id = $1
+        """, telegram_id)
+        return float(span) if span is not None else 0.0
+
+
+async def get_spend_rates(telegram_id: int) -> list[dict]:
+    """Оценка месячных трат по категориям: темп за последние 90 дней (без разовых),
+    приведённый к месяцу. Окно короче 90 дней, если учёт ведётся недавно."""
+    async with _pool.acquire() as conn:
+        span = await conn.fetchval("""
+            SELECT EXTRACT(EPOCH FROM (NOW() - MIN(occurred_at))) / 86400.0
+            FROM transactions WHERE telegram_id = $1
+        """, telegram_id)
+        if span is None:
+            return []
+        days = max(1.0, min(90.0, float(span)))
+        rows = await conn.fetch("""
+            SELECT c.id AS category_id, c.name, c.icon, SUM(t.amount) AS total
+            FROM transactions t
+            JOIN categories c ON c.id = t.category_id
+            WHERE t.telegram_id = $1 AND t.type = 'expense' AND NOT t.is_oneoff
+              AND t.occurred_at >= NOW() - INTERVAL '90 days'
+            GROUP BY c.id, c.name, c.icon
+            ORDER BY total DESC
+        """, telegram_id)
+        return [
+            {**dict(r), "monthly_est": float(r["total"]) * 30.44 / days}
+            for r in rows
+        ]
 
 
 async def delete_budget(telegram_id: int, category_id: int) -> bool:
@@ -510,7 +571,7 @@ async def delete_budget(telegram_id: int, category_id: int) -> bool:
 async def get_budget_progress(telegram_id: int, start: datetime, end: datetime) -> list[dict]:
     async with _pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT c.id AS category_id, c.name, c.icon, b.amount AS budget,
+            SELECT c.id AS category_id, c.name, c.icon, b.amount AS budget, b.mode,
                    COALESCE(SUM(t.amount), 0) AS spent,
                    COALESCE(SUM(t.amount) FILTER (WHERE t.is_oneoff), 0) AS spent_oneoff
             FROM budgets b
@@ -520,7 +581,7 @@ async def get_budget_progress(telegram_id: int, start: datetime, end: datetime) 
                 AND t.type = 'expense'
                 AND t.occurred_at >= $2 AND t.occurred_at < $3
             WHERE b.telegram_id = $1
-            GROUP BY c.id, c.name, c.icon, b.amount
+            GROUP BY c.id, c.name, c.icon, b.amount, b.mode
             ORDER BY c.name
         """, telegram_id, start, end)
         return [dict(r) for r in rows]
