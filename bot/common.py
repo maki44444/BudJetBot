@@ -42,14 +42,26 @@ def parse_date_arg(text: str) -> Date | None:
 
 def month_range() -> tuple[datetime, datetime]:
     now = datetime.now(MOSCOW)
-    start = MOSCOW.localize(datetime(now.year, now.month, 1))
-    if now.month == 12:
-        end = MOSCOW.localize(datetime(now.year + 1, 1, 1))
+    return month_range_for(now.year, now.month)
+
+
+def month_range_for(year: int, month: int) -> tuple[datetime, datetime]:
+    start = MOSCOW.localize(datetime(year, month, 1))
+    if month == 12:
+        end = MOSCOW.localize(datetime(year + 1, 1, 1))
     else:
-        end = MOSCOW.localize(datetime(now.year, now.month + 1, 1))
+        end = MOSCOW.localize(datetime(year, month + 1, 1))
     return start, end
+
+
+def prev_month(year: int, month: int) -> tuple[int, int]:
+    return (year - 1, 12) if month == 1 else (year, month - 1)
 
 
 def month_label() -> str:
     now = datetime.now(MOSCOW)
-    return f"{_MONTHS[now.month - 1]} {now.year}"
+    return month_label_for(now.year, now.month)
+
+
+def month_label_for(year: int, month: int) -> str:
+    return f"{_MONTHS[month - 1]} {year}"

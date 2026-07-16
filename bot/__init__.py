@@ -8,7 +8,7 @@ from telegram.ext import (
     ContextTypes, filters,
 )
 
-from . import access, keyboards, common, transactions, categories, limits, limit_alerts, auto_limits, reminders, admin
+from . import access, keyboards, common, transactions, categories, limits, limit_alerts, auto_limits, ai_review, reminders, admin
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 SITE_URL = os.environ.get("SITE_URL", "")
@@ -27,6 +27,7 @@ USER_COMMANDS = [
     BotCommand("addcategory", "Добавить категорию"),
     BotCommand("limit", "Задать лимит, напр. /limit Продукты 20000"),
     BotCommand("limits", "Прогресс по лимитам"),
+    BotCommand("review", "ИИ-разбор трат за месяц"),
 ]
 
 ADMIN_COMMANDS = USER_COMMANDS + [
@@ -54,12 +55,14 @@ HELP_TEXT = (
     "Быстрый ввод:\n"
     "  350 такси — расход 350₽ с описанием «такси»\n"
     "  +50000 зарплата — доход 50000₽\n"
-    "  05.07 350 такси — запись задним числом (на 5 июля)\n\n"
+    "  05.07 350 такси — запись задним числом (на 5 июля)\n"
+    "  Категорию бот угадывает по описанию сам — если ошибся, жми 🔁\n\n"
     "Команды:\n"
     "  /day 05.07 — записи за конкретный день\n"
     "  /addcategory 🎮 Хобби — добавить категорию\n"
     "  /limit Продукты 20000 — задать месячный лимит\n"
-    "  /limit Продукты 0 — снять лимит\n\n"
+    "  /limit Продукты 0 — снять лимит\n"
+    "  /review — ИИ-разбор трат за месяц (/review прошлый)\n\n"
     f"Каждый вечер в {REMINDER_HOUR}:00 МСК бот напомнит, если за день не было ни одной записи."
 )
 
@@ -119,11 +122,14 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("addcategory", categories.cmd_addcategory, filters=private))
     app.add_handler(CommandHandler("limit", limits.cmd_limit, filters=private))
     app.add_handler(CommandHandler("limits", limits.cmd_limits, filters=private))
+    app.add_handler(CommandHandler("review", ai_review.cmd_review, filters=private))
     app.add_handler(CommandHandler("grant", admin.cmd_grant, filters=private))
     app.add_handler(CommandHandler("revoke", admin.cmd_revoke, filters=private))
     app.add_handler(CommandHandler("users", admin.cmd_users, filters=private))
 
     app.add_handler(CallbackQueryHandler(transactions.handle_category_choice, pattern=r"^cat:"))
+    app.add_handler(CallbackQueryHandler(transactions.handle_change_request, pattern=r"^chg:"))
+    app.add_handler(CallbackQueryHandler(transactions.handle_change_choice, pattern=r"^chgc:"))
     app.add_handler(CallbackQueryHandler(transactions.handle_oneoff, pattern=r"^oneoff:"))
     app.add_handler(CallbackQueryHandler(transactions.handle_delete_request, pattern=r"^delq:"))
     app.add_handler(CallbackQueryHandler(transactions.handle_undo_confirm, pattern=r"^undo:"))
@@ -142,8 +148,11 @@ def build_app() -> Application:
     app.job_queue.run_monthly(
         auto_limits.recalc_auto_limits, when=dtime(9, 0, 0, tzinfo=common.MOSCOW), day=1
     )
+    app.job_queue.run_monthly(
+        ai_review.monthly_review_job, when=dtime(9, 30, 0, tzinfo=common.MOSCOW), day=1
+    )
     logger.info(
         "Bot configured, evening reminder at %02d:00 MSK, limit check at 12:00 MSK, "
-        "auto-limits recalc on 1st at 09:00 MSK", REMINDER_HOUR
+        "auto-limits recalc on 1st at 09:00 MSK, AI review on 1st at 09:30 MSK", REMINDER_HOUR
     )
     return app

@@ -3,8 +3,10 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.constants import ChatAction
 from telegram.ext import ContextTypes
 
+import ai
 import db
 from . import access, keyboards, common
 
@@ -70,12 +72,31 @@ async def handle_quick_entry(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return True
 
-    context.user_data["pending_tx"] = {
+    pending = {
         "amount": amount,
         "type": type_,
         "description": description.strip() or None,
         "occurred_date": occurred_date,
     }
+
+    # Автокатегоризация: сначала память прошлых выборов, потом ИИ (если настроен)
+    category = None
+    if pending["description"]:
+        category = await db.recall_category(uid, pending["description"], type_)
+        if category is None and ai.enabled():
+            await update.message.chat.send_action(ChatAction.TYPING)
+            guessed_id = await ai.guess_category(pending["description"], categories)
+            if guessed_id:
+                category = next((c for c in categories if c["id"] == guessed_id), None)
+    if category:
+        tx_id = await _save_pending(uid, pending, category["id"])
+        await update.message.reply_text(
+            _saved_text(pending, category),
+            reply_markup=await _saved_markup(uid, pending, tx_id, changeable=True),
+        )
+        return True
+
+    context.user_data["pending_tx"] = pending
     kind = "доход" if is_income else "трата"
     date_note = f" за {occurred_date.strftime('%d.%m.%Y')}" if occurred_date else ""
     await update.message.reply_text(
@@ -83,6 +104,43 @@ async def handle_quick_entry(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup=keyboards.category_keyboard(categories),
     )
     return True
+
+
+async def _save_pending(uid: int, pending: dict, category_id: int) -> int:
+    """Пишет транзакцию в БД и запоминает фразу→категорию для будущих угадываний."""
+    occurred_date = pending.get("occurred_date")
+    if occurred_date:
+        occurred_at = common.MOSCOW.localize(
+            datetime.combine(occurred_date, datetime.now(common.MOSCOW).time())
+        )
+    else:
+        occurred_at = datetime.now(common.MOSCOW)
+    tx_id = await db.add_transaction(
+        uid, category_id, pending["type"], pending["amount"], pending["description"], occurred_at,
+    )
+    if pending["description"]:
+        await db.remember_category(uid, pending["description"], category_id)
+    return tx_id
+
+
+def _saved_text(pending: dict, category: dict) -> str:
+    sign = "+" if pending["type"] == "income" else "-"
+    occurred_date = pending.get("occurred_date")
+    date_note = f" ({occurred_date.strftime('%d.%m.%Y')})" if occurred_date else ""
+    return f"✅ {sign}{common.fmt_amount(pending['amount'])}₽ — {category['icon']} {category['name']}{date_note}"
+
+
+async def _saved_markup(uid: int, pending: dict, tx_id: int, changeable: bool):
+    rows = []
+    if changeable:
+        rows.append([InlineKeyboardButton("🔁 Изменить категорию", callback_data=f"chg:{tx_id}")])
+    if pending["type"] == "expense":
+        settings = await db.get_user_settings(uid)
+        if pending["amount"] >= settings["oneoff_threshold"]:
+            rows.append([InlineKeyboardButton(
+                "⚡ Разовая — не учитывать в прогнозе", callback_data=f"oneoff:{tx_id}",
+            )])
+    return InlineKeyboardMarkup(rows) if rows else None
 
 
 async def handle_category_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -98,28 +156,45 @@ async def handle_category_choice(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text("Категория не найдена.")
         return
     uid = update.effective_user.id
-    occurred_date = pending.get("occurred_date")
-    if occurred_date:
-        occurred_at = common.MOSCOW.localize(
-            datetime.combine(occurred_date, datetime.now(common.MOSCOW).time())
-        )
-    else:
-        occurred_at = datetime.now(common.MOSCOW)
-    tx_id = await db.add_transaction(
-        uid, category_id, pending["type"], pending["amount"], pending["description"], occurred_at,
-    )
-    sign = "+" if pending["type"] == "income" else "-"
-    date_note = f" ({occurred_date.strftime('%d.%m.%Y')})" if occurred_date else ""
-    markup = None
-    if pending["type"] == "expense":
-        settings = await db.get_user_settings(uid)
-        if pending["amount"] >= settings["oneoff_threshold"]:
-            markup = InlineKeyboardMarkup([[InlineKeyboardButton(
-                "⚡ Разовая — не учитывать в прогнозе", callback_data=f"oneoff:{tx_id}",
-            )]])
+    tx_id = await _save_pending(uid, pending, category_id)
     await query.edit_message_text(
-        f"✅ {sign}{common.fmt_amount(pending['amount'])}₽ — {category['icon']} {category['name']}{date_note}",
-        reply_markup=markup,
+        _saved_text(pending, category),
+        reply_markup=await _saved_markup(uid, pending, tx_id, changeable=False),
+    )
+
+
+async def handle_change_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Кнопка «Изменить категорию» под автоматически сохранённой записью."""
+    query = update.callback_query
+    await query.answer()
+    tx_id = int(query.data.split(":", 1)[1])
+    uid = update.effective_user.id
+    tx = await db.get_transaction(uid, tx_id)
+    if not tx:
+        await query.edit_message_text("Запись не найдена — возможно, удалена.")
+        return
+    categories = await db.get_categories(uid, tx["type"])
+    await query.edit_message_reply_markup(keyboards.change_category_keyboard(categories, tx_id))
+
+
+async def handle_change_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    _, tx_id, category_id = query.data.split(":")
+    tx_id, category_id = int(tx_id), int(category_id)
+    uid = update.effective_user.id
+    tx = await db.get_transaction(uid, tx_id)
+    category = await db.get_category(category_id)
+    if not tx or not category:
+        await query.edit_message_text("Запись или категория не найдена.")
+        return
+    await db.update_transaction_category(uid, tx_id, category_id)
+    # исправление — самый ценный сигнал для памяти: запоминаем сразу
+    if tx["description"]:
+        await db.remember_category(uid, tx["description"], category_id)
+    sign = "+" if tx["type"] == "income" else "-"
+    await query.edit_message_text(
+        f"✅ {sign}{common.fmt_amount(tx['amount'])}₽ — {category['icon']} {category['name']}"
     )
 
 

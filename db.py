@@ -1,5 +1,6 @@
 import asyncpg
 import logging
+import re
 from datetime import date, datetime
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,16 @@ async def _create_tables() -> None:
                 day         DATE NOT NULL,
                 created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 PRIMARY KEY (telegram_id, day)
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS category_memory (
+                telegram_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+                phrase      TEXT NOT NULL,
+                category_id INT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+                uses        INT NOT NULL DEFAULT 1,
+                updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (telegram_id, phrase)
             )
         """)
 
@@ -296,6 +307,53 @@ async def add_category(telegram_id: int, name: str, icon: str, type_: str) -> di
             ON CONFLICT (telegram_id, name) WHERE telegram_id IS NOT NULL DO NOTHING
             RETURNING id, name, icon, type
         """, telegram_id, name, icon, type_)
+        return dict(row) if row else None
+
+
+# ---------- память категорий (автокатегоризация) ----------
+
+_WORD_RE = re.compile(r"[а-яёa-z0-9]+")
+
+
+def _normalize_phrase(text: str) -> tuple[str, list[str]]:
+    """«Такси до дома» → ("такси до дома", ["такси", "до", "дома"])."""
+    tokens = _WORD_RE.findall(text.lower().replace("ё", "е"))
+    return " ".join(tokens), tokens
+
+
+async def remember_category(telegram_id: int, description: str, category_id: int) -> None:
+    """Запоминает выбор категории для фразы — следующий раз угадаем без ИИ."""
+    phrase, _ = _normalize_phrase(description)
+    if not phrase:
+        return
+    async with _pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO category_memory (telegram_id, phrase, category_id)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (telegram_id, phrase) DO UPDATE
+                SET category_id = EXCLUDED.category_id,
+                    uses = category_memory.uses + 1,
+                    updated_at = NOW()
+        """, telegram_id, phrase, category_id)
+
+
+async def recall_category(telegram_id: int, description: str, type_: str) -> dict | None:
+    """Ищет категорию по прошлым выборам: точная фраза, иначе пересечение слов
+    («такси» найдёт запомненное «такси до дома» и наоборот)."""
+    phrase, tokens = _normalize_phrase(description)
+    if not phrase:
+        return None
+    words = [t for t in tokens if len(t) >= 3]
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT c.id, c.name, c.icon
+            FROM category_memory m
+            JOIN categories c ON c.id = m.category_id
+            WHERE m.telegram_id = $1 AND c.type = $2
+              AND (m.phrase = $3 OR string_to_array(m.phrase, ' ') && $4::text[])
+            ORDER BY (m.phrase = $3) DESC, m.uses DESC, m.updated_at DESC
+            LIMIT 1
+        """, telegram_id, type_, phrase, words)
         return dict(row) if row else None
 
 

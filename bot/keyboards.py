@@ -33,6 +33,16 @@ def category_keyboard(categories: list[dict], columns: int = 2) -> InlineKeyboar
     return InlineKeyboardMarkup(rows)
 
 
+def change_category_keyboard(categories: list[dict], tx_id: int, columns: int = 2) -> InlineKeyboardMarkup:
+    """Выбор новой категории для уже сохранённой записи (кнопка 🔁)."""
+    buttons = [
+        InlineKeyboardButton(f"{c['icon']} {c['name']}", callback_data=f"chgc:{tx_id}:{c['id']}")
+        for c in categories
+    ]
+    rows = [buttons[i:i + columns] for i in range(0, len(buttons), columns)]
+    return InlineKeyboardMarkup(rows)
+
+
 def day_delete_keyboard(txs: list[dict], fmt_amount) -> InlineKeyboardMarkup:
     """Кнопка удаления на каждую запись дня + ссылка на сайт."""
     rows = []
