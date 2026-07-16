@@ -1,37 +1,37 @@
-/* Палитра — референсные значения dataviz-гайда, светлая и тёмная тема */
+/* «Швейцарская сетка»: видимые рамки, без теней, малые радиусы, капительные
+   ярлыки, плотная информация. Светлая тема — базовая; тёмная включается
+   вручную ([data-theme="dark"], переключатель в шапке). */
 :root {
-  --page: #f9f9f7;
-  --surface-1: #fcfcfb;
-  --ink-1: #0b0b0b;
-  --ink-2: #52514e;
-  --ink-muted: #898781;
-  --grid: #e1e0d9;
-  --border: rgba(11, 11, 11, 0.10);
-  --series-1: #2a78d6;        /* категориальный слот 1 (синий) — расходы */
-  --series-2: #1baf7a;        /* категориальный слот 2 (аква) — доходы */
-  --series-track: #cde2fb;    /* светлая ступень того же синего */
+  --page: #fafbfc;
+  --surface-1: #ffffff;
+  --ink-1: #16181d;
+  --ink-2: #4d5361;
+  --ink-muted: #858c9b;
+  --grid: #e8ebef;
+  --baseline: #ccd2da;
+  --series-1: #2a78d6;        /* расходы */
+  --series-2: #1baf7a;        /* доходы */
+  --series-track: #e3eefb;
   --good-text: #006300;
   --warning: #fab219;
   --warning-track: #fbecc8;
   --critical: #d03b3b;
   --critical-track: #f5d2d2;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --page: #0d0d0d;
-    --surface-1: #1a1a19;
-    --ink-1: #ffffff;
-    --ink-2: #c3c2b7;
-    --ink-muted: #898781;
-    --grid: #2c2c2a;
-    --border: rgba(255, 255, 255, 0.10);
-    --series-1: #3987e5;
-    --series-2: #199e70;
-    --series-track: #104281;
-    --good-text: #0ca30c;
-    --warning-track: #45350f;
-    --critical-track: #451c1c;
-  }
+[data-theme="dark"] {
+  --page: #0e1013;
+  --surface-1: #16181d;
+  --ink-1: #f2f4f7;
+  --ink-2: #b7bcc7;
+  --ink-muted: #7c8391;
+  --grid: #23262d;
+  --baseline: #363b45;
+  --series-1: #3987e5;
+  --series-2: #199e70;
+  --series-track: #104281;
+  --good-text: #0ca30c;
+  --warning-track: #45350f;
+  --critical-track: #451c1c;
 }
 
 * { box-sizing: border-box; }
@@ -43,14 +43,23 @@ body {
   color: var(--ink-1);
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: 15px;
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
-.page { max-width: 720px; margin: 0 auto; padding: 16px 12px 48px; }
+.page { max-width: 760px; margin: 0 auto; padding: 22px 16px 64px; }
 
 .muted { color: var(--ink-muted); }
 .small { font-size: 13px; }
 .delta-good { color: var(--good-text); }
+.delta-bad { color: var(--critical); }
+
+/* капительный ярлык — базовый приём этого дизайна */
+.caps-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
 
 /* ── Шапка ── */
 .topbar {
@@ -58,42 +67,69 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 18px;
 }
-.brand { font-weight: 600; font-size: 17px; }
+.brand {
+  font-weight: 800;
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
 .month-nav { display: flex; align-items: center; gap: 4px; }
-.month-label { min-width: 130px; text-align: center; font-weight: 500; }
+.month-label {
+  min-width: 124px;
+  text-align: center;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
 
 .icon-btn, .ghost-btn {
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  background: var(--surface-1);
+  border: 1px solid var(--baseline);
+  border-radius: 6px;
   color: var(--ink-1);
   cursor: pointer;
   font: inherit;
-  padding: 4px 10px;
+  font-size: 13px;
+  padding: 4px 11px;
+  transition: border-color 0.12s;
 }
-.icon-btn { padding: 4px 12px; font-size: 16px; }
-.icon-btn:hover, .ghost-btn:hover { background: var(--grid); }
+.icon-btn:hover, .ghost-btn:hover { border-color: var(--ink-1); }
 .ghost-btn.wide { display: block; width: 100%; margin-top: 12px; }
 
-/* ── Табы ── */
-.tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+/* ── Табы — единый контур, активный залит чернилами ── */
+.tabs {
+  display: flex;
+  margin-bottom: 16px;
+  border: 1px solid var(--baseline);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface-1);
+}
 .tabs button {
   flex: 1;
   background: none;
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border: none;
+  border-left: 1px solid var(--grid);
   color: var(--ink-2);
   cursor: pointer;
   font: inherit;
+  font-size: 13.5px;
   padding: 8px 0;
+  transition: background 0.12s, color 0.12s;
 }
+.tabs button:first-child { border-left: none; }
 .tabs button.active {
-  background: var(--surface-1);
-  border-color: var(--series-1);
-  color: var(--ink-1);
+  background: var(--ink-1);
+  color: var(--surface-1);
   font-weight: 600;
+}
+.tabs button:focus-visible,
+.chips button:focus-visible,
+.icon-btn:focus-visible,
+.ghost-btn:focus-visible {
+  outline: 2px solid var(--series-1);
+  outline-offset: -2px;
 }
 
 /* ── Плитки KPI ── */
@@ -101,50 +137,69 @@ body {
 .tile {
   flex: 1;
   background: var(--surface-1);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 12px 14px;
+  border: 1px solid var(--grid);
+  border-radius: 10px;
+  padding: 13px 15px;
 }
-.tile-label { color: var(--ink-2); font-size: 13px; margin-bottom: 4px; }
-.tile-value { font-size: 22px; font-weight: 600; }
-.tile-delta { font-size: 12px; margin-top: 3px; }
-.delta-bad { color: var(--critical); }
+.tile-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-muted);
+  margin-bottom: 6px;
+}
+.tile-value {
+  font-size: 23px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.tile-delta { font-size: 12px; margin-top: 4px; }
 
 /* ── Карточки ── */
 .card {
   background: var(--surface-1);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 14px 16px;
+  border: 1px solid var(--grid);
+  border-radius: 10px;
+  padding: 16px 18px;
   margin-bottom: 12px;
 }
-.card h3 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
+.card h3 {
+  margin: 0 0 13px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-2);
+}
 .card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 13px;
 }
 .card-head h3 { margin: 0; }
 
 /* ── Плашки-переключатели периода ── */
 .chips { display: flex; gap: 4px; }
 .chips button {
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  background: var(--surface-1);
+  border: 1px solid var(--baseline);
+  border-radius: 6px;
   color: var(--ink-2);
   cursor: pointer;
   font: inherit;
   font-size: 12px;
-  padding: 3px 10px;
+  padding: 2px 9px;
   white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
 }
 .chips button.active {
-  background: var(--series-track);
-  border-color: var(--series-1);
-  color: var(--ink-1);
+  background: var(--ink-1);
+  border-color: var(--ink-1);
+  color: var(--surface-1);
   font-weight: 500;
 }
 
@@ -154,15 +209,19 @@ body {
   grid-template-columns: minmax(120px, 40%) 1fr auto;
   align-items: center;
   gap: 10px;
-  margin-bottom: 8px;
+  margin-bottom: 9px;
 }
-.hbar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hbar-track { background: none; }
+.hbar-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+}
 .hbar-fill {
-  height: 16px;
+  height: 15px;
   min-width: 2px;
   background: var(--series-1);
-  border-radius: 0 4px 4px 0;  /* скругление на конце данных, прямой у базовой линии */
+  border-radius: 0 3px 3px 0;
 }
 .hbar-value {
   color: var(--ink-2);
@@ -170,6 +229,7 @@ body {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+.hbar-delta { font-size: 12px; margin-left: 4px; }
 
 /* ── Столбики по дням ── */
 .colchart-wrap { position: relative; padding-top: 18px; }
@@ -185,7 +245,7 @@ body {
   position: absolute;
   left: 0;
   right: 0;
-  border-top: 1px solid var(--grid);   /* hairline, за столбиками */
+  border-top: 1px solid var(--grid);
 }
 .colchart-grid span {
   position: absolute;
@@ -197,7 +257,7 @@ body {
 }
 .colchart-slot {
   position: relative;
-  z-index: 1;                  /* столбики поверх линий сетки */
+  z-index: 1;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
@@ -206,36 +266,19 @@ body {
 .colchart-pair {
   display: flex;
   align-items: flex-end;
-  gap: 2px;                    /* surface gap между парными столбиками */
+  gap: 2px;
   height: 100%;
   margin: 0 12%;
 }
 .colchart-bar {
   flex: 1;
-  border-radius: 6px 6px 0 0;  /* округлый конец данных, прямой у базовой линии */
+  border-radius: 3px 3px 0 0;
   min-height: 0;
   transition: height 0.25s, filter 0.15s;
 }
 .bar-expense { background: var(--series-1); }
 .bar-income { background: var(--series-2); }
-.colchart-slot:hover .colchart-bar { filter: brightness(1.25); }
-
-.legend {
-  display: flex;
-  gap: 16px;
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--ink-2);
-}
-.legend span { display: flex; align-items: center; gap: 5px; }
-.legend-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-.dot-expense { background: var(--series-1); }
-.dot-income { background: var(--series-2); }
+.colchart-slot:hover .colchart-bar { filter: brightness(1.15); }
 .colchart-peak {
   position: absolute;
   top: -16px;
@@ -245,12 +288,9 @@ body {
   font-weight: 600;
   color: var(--ink-2);
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
-.colchart-axis {
-  display: grid;
-  gap: 3px;
-  margin-top: 4px;
-}
+.colchart-axis { display: grid; gap: 3px; margin-top: 4px; }
 .colchart-tick {
   text-align: center;
   font-size: 10px;
@@ -258,7 +298,17 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.hbar-delta { font-size: 12px; margin-left: 4px; }
+.legend {
+  display: flex;
+  gap: 16px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.legend span { display: flex; align-items: center; gap: 5px; }
+.legend-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.dot-expense { background: var(--series-1); }
+.dot-income { background: var(--series-2); }
 
 /* ── Метры лимитов ── */
 .meter-row { margin-bottom: 12px; }
@@ -266,18 +316,18 @@ body {
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  font-size: 13px;
-  margin-bottom: 4px;
+  font-size: 13.5px;
+  margin-bottom: 5px;
 }
 .meter-status { color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .meter-status.st-critical { color: var(--critical); font-weight: 600; }
 .meter-track {
   height: 12px;
-  border-radius: 0 4px 4px 0;
+  border-radius: 0 3px 3px 0;
   background: var(--series-track);
   overflow: hidden;
 }
-.meter-fill { height: 100%; background: var(--series-1); border-radius: 0 4px 4px 0; }
+.meter-fill { height: 100%; background: var(--series-1); }
 .meter-track.st-warning { background: var(--warning-track); }
 .meter-track.st-warning .meter-fill { background: var(--warning); }
 .meter-track.st-critical { background: var(--critical-track); }
@@ -289,14 +339,15 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 select, input[type="number"] {
   background: var(--surface-1);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 1px solid var(--baseline);
+  border-radius: 6px;
   color: var(--ink-1);
   font: inherit;
+  font-size: 13.5px;
   padding: 5px 8px;
   max-width: 100%;
 }
@@ -304,31 +355,19 @@ select, input[type="number"] {
 .tx-table { width: 100%; border-collapse: collapse; }
 .tx-table td {
   border-top: 1px solid var(--grid);
-  padding: 7px 4px;
+  padding: 8px 5px;
   vertical-align: middle;
+  font-size: 13.5px;
 }
 .tx-table tr:first-child td { border-top: none; }
-.tx-date { color: var(--ink-muted); font-size: 13px; white-space: nowrap; width: 48px; }
+.tx-date { color: var(--ink-muted); font-size: 12.5px; white-space: nowrap; width: 48px; }
 .tx-cat { display: flex; flex-direction: column; gap: 2px; }
 .tx-amount {
   text-align: right;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
-  font-weight: 500;
+  font-weight: 600;
 }
-.tx-del { width: 36px; text-align: right; }
-
-/* ── Лимиты (управление) ── */
-.limits-table { width: 100%; border-collapse: collapse; }
-.limits-table td {
-  border-top: 1px solid var(--grid);
-  padding: 8px 4px;
-  vertical-align: middle;
-}
-.limits-table tr:first-child td { border-top: none; }
-.limit-edit { display: flex; gap: 6px; justify-content: flex-end; }
-.limit-edit input { width: 110px; }
-
 .tx-oneoff { width: 36px; text-align: right; }
 .oneoff-btn { opacity: 0.35; }
 .oneoff-btn.active {
@@ -336,6 +375,19 @@ select, input[type="number"] {
   background: var(--warning-track);
   border-color: var(--warning);
 }
+.tx-del { width: 36px; text-align: right; }
+
+/* ── Лимиты (управление) ── */
+.limits-table { width: 100%; border-collapse: collapse; }
+.limits-table td {
+  border-top: 1px solid var(--grid);
+  padding: 8px 5px;
+  vertical-align: middle;
+  font-size: 13.5px;
+}
+.limits-table tr:first-child td { border-top: none; }
+.limit-edit { display: flex; gap: 6px; justify-content: flex-end; }
+.limit-edit input { width: 110px; }
 
 /* ── Настройки ── */
 .setting-row {
@@ -343,7 +395,7 @@ select, input[type="number"] {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 10px 0;
+  padding: 12px 0;
   border-top: 1px solid var(--grid);
 }
 .setting-row:first-of-type { border-top: none; }
@@ -369,18 +421,25 @@ select, input[type="number"] {
 }
 .login-card {
   background: var(--surface-1);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  max-width: 360px;
-  padding: 32px 28px;
+  border: 1px solid var(--grid);
+  border-radius: 12px;
+  max-width: 380px;
+  padding: 34px 30px;
   text-align: center;
 }
-.login-card h1 { margin: 0 0 8px; font-size: 24px; }
+.login-card h1 {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
 .login-card p { color: var(--ink-2); }
-#tg-login { display: flex; justify-content: center; margin: 20px 0; }
+#tg-login { display: flex; justify-content: center; margin: 22px 0; }
 
 @media (max-width: 560px) {
+  .page { padding-top: 14px; }
   .kpi-row { flex-direction: column; }
   .hbar-row { grid-template-columns: minmax(90px, 35%) 1fr auto; }
-  .month-label { min-width: 110px; }
+  .month-label { min-width: 106px; }
 }

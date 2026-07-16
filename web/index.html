@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Бюджет</title>
+<script>
+  // Тема применяется до загрузки стилей, чтобы не мигало при открытии
+  document.documentElement.dataset.theme = localStorage.getItem("theme") || "light";
+</script>
 <link rel="stylesheet" href="/style.css">
 <script src="https://unpkg.com/vue@3.4.38/dist/vue.global.prod.js"></script>
 </head>
@@ -17,7 +21,12 @@
       <span class="month-label">{{ monthLabel }}</span>
       <button class="icon-btn" @click="nextMonth" aria-label="Следующий месяц">›</button>
     </div>
-    <button class="ghost-btn" @click="logout">Выйти</button>
+    <div class="month-nav">
+      <button class="icon-btn" @click="toggleTheme" :aria-label="theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'">
+        {{ theme === 'dark' ? '☀️' : '🌙' }}
+      </button>
+      <button class="ghost-btn" @click="logout">Выйти</button>
+    </div>
   </header>
 
   <nav class="tabs">

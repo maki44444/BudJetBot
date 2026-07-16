@@ -23,6 +23,7 @@ createApp({
       categories: { expense: [], income: [] },
       limitDrafts: {},
       settings: { oneoff_threshold: null, reminder_enabled: true },
+      theme: document.documentElement.dataset.theme || "light",
       loading: false,
       chartDays: null,      // null = месяц, 7 или 14 = скользящее окно от сегодня
       dailyExtra: [],       // данные для окон 7/14 дней (грузятся отдельно)
@@ -290,6 +291,11 @@ createApp({
       await this.loadSummary();
     },
 
+    toggleTheme() {
+      this.theme = this.theme === "dark" ? "light" : "dark";
+      document.documentElement.dataset.theme = this.theme;
+      localStorage.setItem("theme", this.theme);
+    },
     async logout() {
       await fetch("/auth/logout", { method: "POST", credentials: "same-origin" });
       location.href = "/login";
