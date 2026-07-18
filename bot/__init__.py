@@ -8,6 +8,7 @@ from telegram.ext import (
     ContextTypes, filters,
 )
 
+import ai
 from . import access, keyboards, common, transactions, categories, limits, limit_alerts, auto_limits, ai_review, reminders, admin
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
@@ -155,4 +156,8 @@ def build_app() -> Application:
         "Bot configured, evening reminder at %02d:00 MSK, limit check at 12:00 MSK, "
         "auto-limits recalc on 1st at 09:00 MSK, AI review on 1st at 09:30 MSK", REMINDER_HOUR
     )
+    if ai.enabled():
+        logger.info("ИИ включён: модель %s через %s", ai.AI_MODEL, ai.AI_BASE_URL)
+    else:
+        logger.info("ИИ выключен — переменная AI_API_KEY не задана")
     return app
