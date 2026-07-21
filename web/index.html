@@ -33,6 +33,7 @@
     <button :class="{active: tab==='dashboard'}" @click="tab='dashboard'">Дашборд</button>
     <button :class="{active: tab==='history'}" @click="tab='history'">История</button>
     <button :class="{active: tab==='limits'}" @click="tab='limits'">Лимиты</button>
+    <button :class="{active: tab==='goals'}" @click="tab='goals'">Цели</button>
     <button :class="{active: tab==='settings'}" @click="tab='settings'">⚙️</button>
   </nav>
 
@@ -295,6 +296,66 @@
         </tbody>
       </table>
     </div>
+  </section>
+
+  <!-- ЦЕЛИ -->
+  <section v-if="tab==='goals'" :class="{stale: loading}">
+    <div class="card">
+      <h3>Новая цель</h3>
+      <div class="goal-form">
+        <input type="text" v-model="newGoal.icon" class="goal-icon-input" maxlength="4" placeholder="🎯">
+        <input type="text" v-model="newGoal.name" class="goal-name-input" placeholder="Название, напр. Отпуск">
+        <input type="number" min="0" step="1000" v-model.number="newGoal.target_amount" placeholder="Сумма">
+        <input type="date" v-model="newGoal.target_date">
+        <button class="ghost-btn" @click="createGoal">Добавить</button>
+      </div>
+      <p class="muted small">Пополнение — виртуальная копилка: не влияет на расходы, лимиты и прогноз.</p>
+    </div>
+
+    <p v-if="!goals.length" class="muted">Целей пока нет — добавь первую выше.</p>
+
+    <div class="card goal-card" v-for="g in activeGoals" :key="g.id">
+      <div class="goal-head">
+        <span>{{ g.icon }} {{ g.name }}</span>
+        <span class="meter-status">
+          {{ fmt(g.saved) }} / {{ fmt(g.target_amount) }} ₽ · {{ goalPct(g) }}%
+          <template v-if="g.is_completed"> · 🎉 готово</template>
+        </span>
+      </div>
+      <div class="meter-track" :class="{'st-complete': g.is_completed}">
+        <div class="meter-fill" :style="{width: Math.min(goalPct(g), 100) + '%'}"></div>
+      </div>
+      <p v-if="goalDeadlineText(g)" class="muted small goal-pace">{{ goalDeadlineText(g) }}</p>
+
+      <div class="goal-actions">
+        <div class="limit-edit">
+          <input type="number" min="0" step="500" v-model.number="contributeDrafts[g.id]" placeholder="сумма">
+          <button class="ghost-btn" @click="contributeGoal(g, 1)">Отложить</button>
+          <button class="ghost-btn" @click="contributeGoal(g, -1)">Снять</button>
+        </div>
+        <div class="btn-row">
+          <button class="ghost-btn" @click="archiveGoal(g)">В архив</button>
+          <button class="ghost-btn" @click="removeGoal(g)">Удалить</button>
+        </div>
+      </div>
+    </div>
+
+    <button class="ghost-btn wide" @click="showArchived = !showArchived" v-if="archivedGoals.length">
+      {{ showArchived ? 'Скрыть архив' : 'Показать архив (' + archivedGoals.length + ')' }}
+    </button>
+
+    <template v-if="showArchived">
+      <div class="card goal-card" v-for="g in archivedGoals" :key="'a' + g.id">
+        <div class="goal-head">
+          <span class="muted">{{ g.icon }} {{ g.name }}</span>
+          <span class="meter-status muted">{{ fmt(g.saved) }} / {{ fmt(g.target_amount) }} ₽ · {{ goalPct(g) }}%</span>
+        </div>
+        <div class="btn-row">
+          <button class="ghost-btn" @click="archiveGoal(g)">Вернуть из архива</button>
+          <button class="ghost-btn" @click="removeGoal(g)">Удалить</button>
+        </div>
+      </div>
+    </template>
   </section>
 
 </div>

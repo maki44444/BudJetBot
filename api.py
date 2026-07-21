@@ -1,6 +1,6 @@
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -320,3 +320,91 @@ async def api_set_limit_mode(body: LimitModeBody, uid: int = Depends(get_current
     if not await db.set_budget_mode(uid, body.category_id, body.mode):
         raise HTTPException(status_code=404, detail="Лимит не найден")
     return {"ok": True}
+
+
+# ── Цели накопления (виртуальная копилка — не влияет на транзакции/лимиты) ────
+
+@app.get("/api/goals")
+async def api_goals(include_archived: bool = False, uid: int = Depends(get_current_user)):
+    return {"items": await db.get_goals(uid, include_archived=include_archived)}
+
+
+class GoalCreateBody(BaseModel):
+    name: str
+    icon: str = "🎯"
+    target_amount: float
+    target_date: str | None = None  # YYYY-MM-DD
+
+
+@app.post("/api/goals")
+async def api_create_goal(body: GoalCreateBody, uid: int = Depends(get_current_user)):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Укажи название цели")
+    if body.target_amount <= 0:
+        raise HTTPException(status_code=400, detail="Сумма должна быть больше нуля")
+    target_date = None
+    if body.target_date:
+        try:
+            target_date = date.fromisoformat(body.target_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Неверный формат даты")
+    icon = body.icon.strip() or "🎯"
+    goal = await db.create_goal(uid, name, Decimal(str(body.target_amount)), target_date, icon)
+    if goal is None:
+        raise HTTPException(status_code=400, detail="Цель с таким названием уже есть")
+    return {"ok": True, "id": goal["id"]}
+
+
+class GoalPatch(BaseModel):
+    icon: str | None = None
+    target_amount: float | None = None
+    target_date: str | None = None  # "" — снять срок; непустая строка — задать; поле отсутствует — не менять
+    is_archived: bool | None = None
+
+
+@app.patch("/api/goals/{goal_id}")
+async def api_update_goal(goal_id: int, body: GoalPatch, uid: int = Depends(get_current_user)):
+    if body.target_amount is not None and body.target_amount <= 0:
+        raise HTTPException(status_code=400, detail="Сумма должна быть больше нуля")
+    kwargs = {}
+    if body.icon is not None:
+        kwargs["icon"] = body.icon.strip() or "🎯"
+    if body.target_amount is not None:
+        kwargs["target_amount"] = Decimal(str(body.target_amount))
+    if body.target_date is not None:
+        try:
+            kwargs["target_date"] = date.fromisoformat(body.target_date) if body.target_date else None
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Неверный формат даты")
+    if body.is_archived is not None:
+        kwargs["is_archived"] = body.is_archived
+    if not kwargs:
+        raise HTTPException(status_code=400, detail="Нечего менять")
+    if not await db.update_goal(uid, goal_id, **kwargs):
+        raise HTTPException(status_code=404, detail="Цель не найдена")
+    return {"ok": True}
+
+
+@app.delete("/api/goals/{goal_id}")
+async def api_delete_goal(goal_id: int, uid: int = Depends(get_current_user)):
+    if not await db.delete_goal(uid, goal_id):
+        raise HTTPException(status_code=404, detail="Цель не найдена")
+    return {"ok": True}
+
+
+class GoalContributeBody(BaseModel):
+    amount: float
+
+
+@app.post("/api/goals/{goal_id}/contribute")
+async def api_contribute_goal(goal_id: int, body: GoalContributeBody, uid: int = Depends(get_current_user)):
+    if body.amount == 0:
+        raise HTTPException(status_code=400, detail="Сумма не может быть нулевой")
+    result = await db.add_goal_contribution(uid, goal_id, Decimal(str(body.amount)))
+    if result is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Цель не найдена или нельзя снять больше, чем накоплено",
+        )
+    return {"ok": True, "goal": result}

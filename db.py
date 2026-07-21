@@ -155,6 +155,29 @@ async def _create_tables() -> None:
                 PRIMARY KEY (telegram_id, phrase)
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS goals (
+                id            SERIAL PRIMARY KEY,
+                telegram_id   BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+                name          TEXT NOT NULL,
+                icon          TEXT NOT NULL DEFAULT '🎯',
+                target_amount NUMERIC(12, 2) NOT NULL CHECK (target_amount > 0),
+                target_date   DATE,
+                is_completed  BOOLEAN NOT NULL DEFAULT FALSE,
+                completed_at  TIMESTAMPTZ,
+                is_archived   BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (telegram_id, name)
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS goal_contributions (
+                id         SERIAL PRIMARY KEY,
+                goal_id    INT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+                amount     NUMERIC(12, 2) NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
 
 
 async def _seed_default_categories() -> None:
@@ -690,3 +713,160 @@ async def has_no_spend_checkin(telegram_id: int, day: date) -> bool:
             "SELECT 1 FROM no_spend_days WHERE telegram_id = $1 AND day = $2", telegram_id, day
         )
         return row is not None
+
+
+# ---------- goals (цели накопления) ----------
+# Пополнение цели — виртуальная копилка: НЕ создаёт transactions, не влияет на
+# расходы/лимиты/прогнозы. Накопленная сумма — SUM(goal_contributions), без
+# отдельного current_amount, чтобы не было рассинхрона.
+
+_GOALS_SELECT = """
+    SELECT g.id, g.telegram_id, g.name, g.icon, g.target_amount, g.target_date,
+           g.is_completed, g.is_archived, g.created_at,
+           COALESCE(SUM(gc.amount), 0) AS saved
+    FROM goals g
+    LEFT JOIN goal_contributions gc ON gc.goal_id = g.id
+"""
+
+
+async def create_goal(
+    telegram_id: int, name: str, target_amount, target_date: date | None, icon: str = "🎯",
+) -> dict | None:
+    """Создаёт цель. Возвращает None, если имя уже занято."""
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            INSERT INTO goals (telegram_id, name, icon, target_amount, target_date)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (telegram_id, name) DO NOTHING
+            RETURNING id, name, icon, target_amount, target_date
+        """, telegram_id, name, icon, target_amount, target_date)
+        return dict(row) if row else None
+
+
+async def get_goals(telegram_id: int, include_archived: bool = False) -> list[dict]:
+    async with _pool.acquire() as conn:
+        clause = "" if include_archived else "AND g.is_archived = FALSE"
+        rows = await conn.fetch(f"""
+            {_GOALS_SELECT}
+            WHERE g.telegram_id = $1 {clause}
+            GROUP BY g.id
+            ORDER BY g.is_completed, g.created_at
+        """, telegram_id)
+        return [dict(r) for r in rows]
+
+
+async def get_goal(telegram_id: int, goal_id: int) -> dict | None:
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow(f"""
+            {_GOALS_SELECT}
+            WHERE g.telegram_id = $1 AND g.id = $2
+            GROUP BY g.id
+        """, telegram_id, goal_id)
+        return dict(row) if row else None
+
+
+async def find_goal_by_name(telegram_id: int, name: str) -> dict | None:
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow(f"""
+            {_GOALS_SELECT}
+            WHERE g.telegram_id = $1 AND LOWER(g.name) = LOWER($2) AND g.is_archived = FALSE
+            GROUP BY g.id
+        """, telegram_id, name)
+        return dict(row) if row else None
+
+
+async def add_goal_contribution(telegram_id: int, goal_id: int, amount) -> dict | None:
+    """Пополняет (amount>0) или снимает (amount<0) копилку цели.
+    Возвращает обновлённую цель с полями saved/just_completed, либо None если
+    цель не найдена или снятие увело бы сумму ниже нуля."""
+    async with _pool.acquire() as conn:
+        async with conn.transaction():
+            goal = await conn.fetchrow("""
+                SELECT id, target_amount, is_completed, COALESCE(
+                    (SELECT SUM(amount) FROM goal_contributions WHERE goal_id = goals.id), 0
+                ) AS saved
+                FROM goals WHERE telegram_id = $1 AND id = $2 AND is_archived = FALSE
+                FOR UPDATE
+            """, telegram_id, goal_id)
+            if not goal:
+                return None
+            new_saved = goal["saved"] + amount
+            if new_saved < 0:
+                return None
+            await conn.execute(
+                "INSERT INTO goal_contributions (goal_id, amount) VALUES ($1, $2)",
+                goal_id, amount,
+            )
+            just_completed = False
+            if new_saved >= goal["target_amount"] and not goal["is_completed"]:
+                await conn.execute(
+                    "UPDATE goals SET is_completed = TRUE, completed_at = NOW() WHERE id = $1",
+                    goal_id,
+                )
+                just_completed = True
+            elif new_saved < goal["target_amount"] and goal["is_completed"]:
+                await conn.execute(
+                    "UPDATE goals SET is_completed = FALSE, completed_at = NULL WHERE id = $1",
+                    goal_id,
+                )
+    result = await get_goal(telegram_id, goal_id)
+    if result:
+        result["just_completed"] = just_completed
+    return result
+
+
+async def update_goal(
+    telegram_id: int, goal_id: int, *,
+    name: str | None = None, icon: str | None = None,
+    target_amount=None, target_date: date | None = ..., is_archived: bool | None = None,
+) -> bool:
+    """target_date=... (multiton-default) значит «не менять»; None — снять срок."""
+    fields, values = [], []
+    for col, val in [("name", name), ("icon", icon), ("target_amount", target_amount)]:
+        if val is not None:
+            values.append(val)
+            fields.append(f"{col} = ${len(values)}")
+    if target_date is not ...:
+        values.append(target_date)
+        fields.append(f"target_date = ${len(values)}")
+    if is_archived is not None:
+        values.append(is_archived)
+        fields.append(f"is_archived = ${len(values)}")
+    if not fields:
+        return False
+    values += [telegram_id, goal_id]
+    async with _pool.acquire() as conn:
+        result = await conn.execute(f"""
+            UPDATE goals SET {', '.join(fields)}
+            WHERE telegram_id = ${len(values) - 1} AND id = ${len(values)}
+        """, *values)
+        return result != "UPDATE 0"
+
+
+async def delete_goal(telegram_id: int, goal_id: int) -> bool:
+    async with _pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM goals WHERE telegram_id = $1 AND id = $2", telegram_id, goal_id,
+        )
+        return result != "DELETE 0"
+
+
+async def get_goal_contributions_between(telegram_id: int, start: datetime, end: datetime) -> list[dict]:
+    """Сколько отложено/снято по каждой активной цели за период — для ИИ-разбора."""
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT g.id, g.name, g.icon, g.target_amount, g.target_date,
+                   COALESCE(SUM(gc.amount), 0) AS saved,
+                   COALESCE(SUM(gc.amount) FILTER (
+                       WHERE gc.created_at >= $2 AND gc.created_at < $3
+                   ), 0) AS period_delta
+            FROM goals g
+            LEFT JOIN goal_contributions gc ON gc.goal_id = g.id
+            WHERE g.telegram_id = $1 AND g.is_archived = FALSE
+            GROUP BY g.id
+            HAVING COALESCE(SUM(gc.amount) FILTER (
+                WHERE gc.created_at >= $2 AND gc.created_at < $3
+            ), 0) != 0 OR NOT g.is_completed
+            ORDER BY g.created_at
+        """, telegram_id, start, end)
+        return [dict(r) for r in rows]

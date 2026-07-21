@@ -67,6 +67,17 @@ async def _collect_data(uid: int, start: datetime, end: datetime) -> str | None:
             lines.append(
                 f"  {p['name']}: {common.fmt_amount(p['spent'])} / {common.fmt_amount(p['budget'])} ₽"
             )
+
+    goals = await db.get_goal_contributions_between(uid, start, end)
+    if goals:
+        lines.append("\nЦели накопления (отложено в этом месяце — не расход, отдельная копилка):")
+        for g in goals:
+            delta = g["period_delta"]
+            verb = "отложено" if delta >= 0 else "снято"
+            lines.append(
+                f"  {g['icon']} {g['name']}: {verb} {common.fmt_amount(abs(delta))} ₽ за месяц, "
+                f"накоплено {common.fmt_amount(g['saved'])} / {common.fmt_amount(g['target_amount'])} ₽"
+            )
     return "\n".join(lines)
 
 

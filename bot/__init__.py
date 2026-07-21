@@ -9,7 +9,7 @@ from telegram.ext import (
 )
 
 import ai
-from . import access, keyboards, common, transactions, categories, limits, limit_alerts, auto_limits, ai_review, reminders, admin
+from . import access, keyboards, common, transactions, categories, limits, limit_alerts, auto_limits, ai_review, goals, reminders, admin
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 SITE_URL = os.environ.get("SITE_URL", "")
@@ -28,6 +28,8 @@ USER_COMMANDS = [
     BotCommand("addcategory", "Добавить категорию"),
     BotCommand("limit", "Задать лимит, напр. /limit Продукты 20000"),
     BotCommand("limits", "Прогресс по лимитам"),
+    BotCommand("goal", "Добавить цель, напр. /goal Отпуск 100000"),
+    BotCommand("goals", "Список целей и прогресс"),
     BotCommand("review", "ИИ-разбор трат за месяц"),
 ]
 
@@ -51,6 +53,7 @@ HELP_TEXT = (
     "  За месяц — разбивка по категориям + лимиты\n"
     "  Категории — список категорий\n"
     "  Лимиты — прогресс по лимитам\n"
+    "  Цели — накопления с прогрессом\n"
     "  Отменить последнюю — удалить последнюю ручную запись\n"
     "  Сайт — подробная аналитика в браузере\n\n"
     "Быстрый ввод:\n"
@@ -63,6 +66,8 @@ HELP_TEXT = (
     "  /addcategory 🎮 Хобби — добавить категорию\n"
     "  /limit Продукты 20000 — задать месячный лимит\n"
     "  /limit Продукты 0 — снять лимит\n"
+    "  /goal Отпуск 100000 01.09.2026 — новая цель (дата не обязательна)\n"
+    "  /goal Отпуск 0 — удалить цель\n"
     "  /review — ИИ-разбор трат за месяц (/review прошлый)\n\n"
     f"Каждый вечер в {REMINDER_HOUR}:00 МСК бот напомнит, если за день не было ни одной записи."
 )
@@ -92,6 +97,8 @@ async def route_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await categories.cmd_categories(update, context)
     elif text == "Лимиты":
         await limits.cmd_limits(update, context)
+    elif text == "Цели":
+        await goals.cmd_goals(update, context)
     elif text == "Отменить последнюю":
         await transactions.cmd_undo(update, context)
     elif text == "Помощь":
@@ -101,6 +108,8 @@ async def route_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Подробная аналитика: графики, история, лимиты и настройки:",
             reply_markup=keyboards.site_keyboard(),
         )
+    elif context.user_data.get("pending_goal"):
+        await goals.handle_goal_amount_text(update, context)
     else:
         handled = await transactions.handle_quick_entry(update, context)
         if not handled:
@@ -123,6 +132,8 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("addcategory", categories.cmd_addcategory, filters=private))
     app.add_handler(CommandHandler("limit", limits.cmd_limit, filters=private))
     app.add_handler(CommandHandler("limits", limits.cmd_limits, filters=private))
+    app.add_handler(CommandHandler("goal", goals.cmd_goal, filters=private))
+    app.add_handler(CommandHandler("goals", goals.cmd_goals, filters=private))
     app.add_handler(CommandHandler("review", ai_review.cmd_review, filters=private))
     app.add_handler(CommandHandler("grant", admin.cmd_grant, filters=private))
     app.add_handler(CommandHandler("revoke", admin.cmd_revoke, filters=private))
@@ -135,6 +146,9 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(transactions.handle_delete_request, pattern=r"^delq:"))
     app.add_handler(CallbackQueryHandler(transactions.handle_undo_confirm, pattern=r"^undo:"))
     app.add_handler(CallbackQueryHandler(transactions.handle_cancel, pattern=r"^cancel$"))
+    app.add_handler(CallbackQueryHandler(goals.handle_goal_add_request, pattern=r"^goaladd:"))
+    app.add_handler(CallbackQueryHandler(goals.handle_goal_amount_choice, pattern=r"^goalamt:"))
+    app.add_handler(CallbackQueryHandler(goals.handle_goal_cancel, pattern=r"^goalcancel$"))
     app.add_handler(CallbackQueryHandler(reminders.handle_add_hint, pattern=r"^reminder_add$"))
     app.add_handler(CallbackQueryHandler(reminders.handle_no_spend, pattern=r"^reminder_nospend$"))
 

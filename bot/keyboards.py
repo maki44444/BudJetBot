@@ -2,6 +2,8 @@ import os
 
 from telegram import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
 
+from .common import fmt_amount
+
 SITE_URL = os.environ.get("SITE_URL", "")
 
 
@@ -9,7 +11,7 @@ def main_keyboard() -> ReplyKeyboardMarkup:
     rows = [
         ["Сегодня", "За месяц"],
         ["Категории", "Лимиты"],
-        ["Отменить последнюю"],
+        ["Цели", "Отменить последнюю"],
         ["Помощь", "Сайт"] if SITE_URL else ["Помощь"],
     ]
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
@@ -58,6 +60,16 @@ def day_delete_keyboard(txs: list[dict], fmt_amount) -> InlineKeyboardMarkup:
     if SITE_URL:
         rows.append([InlineKeyboardButton("📊 Подробнее на сайте", url=SITE_URL)])
     return InlineKeyboardMarkup(rows)
+
+
+def goal_contribute_keyboard(goal_id: int) -> InlineKeyboardMarkup:
+    """Готовые суммы пополнения цели + отмена."""
+    amounts = [1000, 5000, 10000]
+    row = [
+        InlineKeyboardButton(f"+{fmt_amount(a)}", callback_data=f"goalamt:{goal_id}:{a}")
+        for a in amounts
+    ]
+    return InlineKeyboardMarkup([row, [InlineKeyboardButton("Отмена", callback_data="goalcancel")]])
 
 
 def confirm_keyboard(yes_data: str, no_data: str = "cancel") -> InlineKeyboardMarkup:

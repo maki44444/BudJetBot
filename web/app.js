@@ -29,6 +29,10 @@ createApp({
       loading: false,
       chartDays: null,      // null = месяц, 7 или 14 = скользящее окно от сегодня
       dailyExtra: [],       // данные для окон 7/14 дней (грузятся отдельно)
+      goals: [],
+      newGoal: { icon: "🎯", name: "", target_amount: null, target_date: "" },
+      contributeDrafts: {},
+      showArchived: false,
     };
   },
 
@@ -108,6 +112,12 @@ createApp({
         hasData: maxAny > 0,
         grid: top > 1 ? [{ value: top / 2, pct: 50 }, { value: top, pct: 100 }] : [],
       };
+    },
+    activeGoals() {
+      return this.goals.filter((g) => !g.is_archived);
+    },
+    archivedGoals() {
+      return this.goals.filter((g) => g.is_archived);
     },
   },
 
@@ -339,6 +349,74 @@ createApp({
       document.documentElement.dataset.theme = this.theme;
       localStorage.setItem("theme", this.theme);
     },
+
+    async loadGoals() {
+      const data = await this.api("/api/goals?include_archived=true");
+      this.goals = data.items;
+    },
+    goalPct(g) {
+      return Number(g.target_amount) > 0
+        ? Math.round((Number(g.saved) / Number(g.target_amount)) * 100)
+        : 0;
+    },
+    fullDate(iso) {
+      const d = new Date(iso);
+      return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
+    },
+    goalDeadlineText(g) {
+      if (!g.target_date || g.is_completed) return null;
+      const daysLeft = Math.round((new Date(g.target_date) - new Date()) / 86400000);
+      const remaining = Number(g.target_amount) - Number(g.saved);
+      if (daysLeft > 0 && remaining > 0) {
+        const monthly = remaining / (daysLeft / 30.44);
+        return `к ${this.fullDate(g.target_date)} — откладывай ~${this.fmt(monthly)} ₽/мес`;
+      }
+      return `срок (${this.fullDate(g.target_date)}) наступил`;
+    },
+    async createGoal() {
+      const name = (this.newGoal.name || "").trim();
+      if (!name) { alert("Укажи название цели"); return; }
+      if (!this.newGoal.target_amount || this.newGoal.target_amount <= 0) {
+        alert("Сумма должна быть больше нуля");
+        return;
+      }
+      await this.api("/api/goals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          icon: this.newGoal.icon || "🎯",
+          target_amount: Number(this.newGoal.target_amount),
+          target_date: this.newGoal.target_date || null,
+        }),
+      });
+      this.newGoal = { icon: "🎯", name: "", target_amount: null, target_date: "" };
+      await this.loadGoals();
+    },
+    async contributeGoal(g, sign) {
+      const raw = this.contributeDrafts[g.id];
+      if (!raw || Number(raw) <= 0) { alert("Введи сумму больше нуля"); return; }
+      await this.api(`/api/goals/${g.id}/contribute`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: Number(raw) * sign }),
+      });
+      delete this.contributeDrafts[g.id];
+      await this.loadGoals();
+    },
+    async archiveGoal(g) {
+      await this.api(`/api/goals/${g.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_archived: !g.is_archived }),
+      });
+      await this.loadGoals();
+    },
+    async removeGoal(g) {
+      if (!confirm(`Удалить цель «${g.name}»? Это нельзя отменить.`)) return;
+      await this.api(`/api/goals/${g.id}`, { method: "DELETE" });
+      await this.loadGoals();
+    },
     async logout() {
       await fetch("/auth/logout", { method: "POST", credentials: "same-origin" });
       location.href = "/login";
@@ -353,7 +431,7 @@ createApp({
     this.loading = true;
     try {
       await Promise.all([
-        this.loadSummary(), this.loadCategories(), this.reloadTx(), this.loadSettings(),
+        this.loadSummary(), this.loadCategories(), this.reloadTx(), this.loadSettings(), this.loadGoals(),
       ]);
     } finally {
       this.loading = false;

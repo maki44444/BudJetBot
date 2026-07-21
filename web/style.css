@@ -332,6 +332,25 @@ body {
 .meter-track.st-warning .meter-fill { background: var(--warning); }
 .meter-track.st-critical { background: var(--critical-track); }
 .meter-track.st-critical .meter-fill { background: var(--critical); }
+.meter-track.st-complete .meter-fill { background: var(--series-2); }
+
+/* ── Цели накопления ── */
+.goal-form { display: flex; flex-wrap: wrap; gap: 6px; }
+.goal-icon-input { width: 52px; text-align: center; }
+.goal-name-input { flex: 1; min-width: 140px; }
+.goal-card + .goal-card { margin-top: 12px; }
+.goal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13.5px;
+  margin-bottom: 5px;
+}
+.goal-pace { margin: 8px 0 0; }
+.goal-actions { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.goal-actions .limit-edit { justify-content: flex-start; }
+.goal-actions .limit-edit input { width: 130px; }
 
 /* ── История ── */
 .filter-row {
@@ -341,7 +360,7 @@ body {
   gap: 8px;
   margin-bottom: 12px;
 }
-select, input[type="number"] {
+select, input[type="number"], input[type="text"], input[type="date"] {
   background: var(--surface-1);
   border: 1px solid var(--baseline);
   border-radius: 6px;
