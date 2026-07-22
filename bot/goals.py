@@ -2,6 +2,7 @@
 Цели накопления — виртуальная копилка: пополнение НЕ создаёт транзакцию и не
 влияет на расходы/лимиты/прогнозы, это просто отметка «отложил в сторону».
 """
+import re
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
@@ -13,9 +14,9 @@ from . import access, common, keyboards
 
 _NO_DATE = object()  # сентинел «дату не указывали» — отличать от «снять дату»
 
-
-def _looks_like_icon(token: str) -> bool:
-    return len(token) > 0 and not token[0].isalnum()
+# Отделяет ведущий эмодзи/символ от остального текста, даже если между ними нет
+# пробела (частый случай на телефоне: клавиатура вставляет эмодзи без пробела).
+_ICON_PREFIX_RE = re.compile(r"^([^\w\s]+)\s*(.*)$", re.UNICODE)
 
 
 def _progress_bar(pct: float, width: int = 10) -> str:
@@ -84,10 +85,10 @@ async def cmd_goal(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Удалить: /goal Отпуск 0"
         )
         return
-    args = list(context.args)
-    icon = "🎯"
-    if _looks_like_icon(args[0]):
-        icon = args.pop(0)
+    text = " ".join(context.args)
+    match = _ICON_PREFIX_RE.match(text)
+    icon, rest = (match.group(1), match.group(2)) if match else ("🎯", text)
+    args = rest.split()
 
     target_date = _NO_DATE
     if len(args) >= 2:

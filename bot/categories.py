@@ -1,12 +1,23 @@
+import re
+
 from telegram import Update
 from telegram.ext import ContextTypes
 
 import db
 from . import access, keyboards
 
+# Отделяет ведущий эмодзи/символ от названия, даже если между ними нет пробела
+# (частый случай на телефоне: клавиатура вставляет эмодзи без пробела) —
+# "🏠квартира" распознаётся как иконка 🏠 + имя "квартира", а не целиком как иконка.
+_ICON_PREFIX_RE = re.compile(r"^([^\w\s]+)\s*(.*)$", re.UNICODE)
 
-def _looks_like_icon(token: str) -> bool:
-    return len(token) > 0 and not token[0].isalnum()
+
+def _split_icon_name(text: str) -> tuple[str, str]:
+    """Возвращает (icon, name); icon = '' если текст начинается с буквы/цифры."""
+    match = _ICON_PREFIX_RE.match(text)
+    if match:
+        return match.group(1), match.group(2).strip()
+    return "", text.strip()
 
 
 async def cmd_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -29,12 +40,8 @@ async def cmd_addcategory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("Использование: /addcategory 🎮 Хобби")
         return
-    icon = "💰"
-    name_parts = context.args
-    if _looks_like_icon(context.args[0]):
-        icon = context.args[0]
-        name_parts = context.args[1:]
-    name = " ".join(name_parts).strip()
+    icon, name = _split_icon_name(" ".join(context.args))
+    icon = icon or "💰"
     if not name:
         await update.message.reply_text("Укажи название категории: /addcategory 🎮 Хобби")
         return
