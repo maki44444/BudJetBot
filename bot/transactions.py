@@ -8,7 +8,7 @@ from telegram.ext import ContextTypes
 
 import ai
 import db
-from . import access, keyboards, common
+from . import access, keyboards, common, bank_notify
 
 _LEADING_AMOUNT_RE = re.compile(r"^([+-]?\d+(?:[.,]\d{1,2})?)\s*(.*)$")
 _TRAILING_AMOUNT_RE = re.compile(r"^(.+?)\s+([+-]?\d+(?:[.,]\d{1,2})?)$")
@@ -43,27 +43,34 @@ def _extract_date_prefix(text: str):
 
 
 async def handle_quick_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Пытается распознать сообщение как быстрый ввод траты/дохода. Возвращает True, если распознал."""
+    """Пытается распознать сообщение как быстрый ввод траты/дохода — обычный текст
+    "350 такси" либо пересланное банковское уведомление. Возвращает True, если распознал."""
     text = (update.message.text or "").strip()
 
     occurred_date = None
-    date_prefix = _extract_date_prefix(text)
-    if date_prefix:
-        occurred_date, text = date_prefix
+    bank_hit = bank_notify.try_parse(text)
+    if bank_hit:
+        amount = bank_hit["amount"]
+        type_ = bank_hit["type"]
+        description = bank_hit["description"]
+    else:
+        date_prefix = _extract_date_prefix(text)
+        if date_prefix:
+            occurred_date, text = date_prefix
 
-    extracted = _extract_amount(text)
-    if not extracted:
-        return False
-    raw_amount, description = extracted
-    is_income = raw_amount.startswith("+")
-    try:
-        amount = Decimal(raw_amount.lstrip("+-").replace(",", "."))
-    except InvalidOperation:
-        return False
-    if amount <= 0:
-        return False
+        extracted = _extract_amount(text)
+        if not extracted:
+            return False
+        raw_amount, description = extracted
+        is_income = raw_amount.startswith("+")
+        try:
+            amount = Decimal(raw_amount.lstrip("+-").replace(",", "."))
+        except InvalidOperation:
+            return False
+        if amount <= 0:
+            return False
+        type_ = "income" if is_income else "expense"
 
-    type_ = "income" if is_income else "expense"
     uid = update.effective_user.id
     categories = await db.get_categories(uid, type_)
     if not categories:
