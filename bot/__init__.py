@@ -9,7 +9,7 @@ from telegram.ext import (
 )
 
 import ai
-from . import access, keyboards, common, transactions, categories, limits, limit_alerts, auto_limits, ai_review, goals, reminders, admin
+from . import access, keyboards, common, transactions, categories, limits, limit_alerts, auto_limits, ai_review, goals, imports, reminders, admin
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 SITE_URL = os.environ.get("SITE_URL", "")
@@ -61,7 +61,8 @@ HELP_TEXT = (
     "  +50000 зарплата — доход 50000₽\n"
     "  05.07 350 такси — запись задним числом (на 5 июля)\n"
     "  Категорию бот угадывает по описанию сам — если ошибся, жми 🔁\n"
-    "  Можно переслать пуш-уведомление банка (Сбер, Ozon Банк, Альфа) — сумму и описание распознает сам\n\n"
+    "  Можно переслать пуш-уведомление банка (Сбер, Ozon Банк, Альфа) — сумму и описание распознает сам\n"
+    "  Можно прислать файлом банковскую выписку — бот сам разберёт и не задвоит с уже внесённым\n\n"
     "Команды:\n"
     "  /day 05.07 — записи за конкретный день\n"
     "  /addcategory 🎮 Хобби — добавить категорию\n"
@@ -152,7 +153,10 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(goals.handle_goal_cancel, pattern=r"^goalcancel$"))
     app.add_handler(CallbackQueryHandler(reminders.handle_add_hint, pattern=r"^reminder_add$"))
     app.add_handler(CallbackQueryHandler(reminders.handle_no_spend, pattern=r"^reminder_nospend$"))
+    app.add_handler(CallbackQueryHandler(imports.handle_bank_choice, pattern=r"^impbank:"))
+    app.add_handler(CallbackQueryHandler(imports.handle_review_choice, pattern=r"^impuse:|^impnew$|^impskip$"))
 
+    app.add_handler(MessageHandler(filters.Document.ALL & private, imports.handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & private, route_text))
 
     app.job_queue.run_daily(

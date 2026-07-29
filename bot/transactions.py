@@ -8,7 +8,7 @@ from telegram.ext import ContextTypes
 
 import ai
 import db
-from . import access, keyboards, common, bank_notify
+from . import access, keyboards, common, bank_notify, autocategorize
 
 _LEADING_AMOUNT_RE = re.compile(r"^([+-]?\d+(?:[.,]\d{1,2})?)\s*(.*)$")
 _TRAILING_AMOUNT_RE = re.compile(r"^(.+?)\s+([+-]?\d+(?:[.,]\d{1,2})?)$")
@@ -87,14 +87,9 @@ async def handle_quick_entry(update: Update, context: ContextTypes.DEFAULT_TYPE)
     }
 
     # Автокатегоризация: сначала память прошлых выборов, потом ИИ (если настроен)
-    category = None
-    if pending["description"]:
-        category = await db.recall_category(uid, pending["description"], type_)
-        if category is None and ai.enabled():
-            await update.message.chat.send_action(ChatAction.TYPING)
-            guessed_id = await ai.guess_category(pending["description"], categories)
-            if guessed_id:
-                category = next((c for c in categories if c["id"] == guessed_id), None)
+    if pending["description"] and ai.enabled():
+        await update.message.chat.send_action(ChatAction.TYPING)
+    category = await autocategorize.guess(uid, pending["description"], type_, categories)
     if category:
         tx_id = await _save_pending(uid, pending, category["id"])
         await update.message.reply_text(

@@ -146,6 +146,20 @@ async def _create_tables() -> None:
             )
         """)
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS import_batches (
+                id              SERIAL PRIMARY KEY,
+                telegram_id     BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+                bank            TEXT NOT NULL,
+                filename        TEXT,
+                total_rows      INT NOT NULL DEFAULT 0,
+                imported_rows   INT NOT NULL DEFAULT 0,
+                reconciled_rows INT NOT NULL DEFAULT 0,
+                duplicate_rows  INT NOT NULL DEFAULT 0,
+                review_rows     INT NOT NULL DEFAULT 0,
+                created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS category_memory (
                 telegram_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
                 phrase      TEXT NOT NULL,
@@ -516,6 +530,86 @@ async def set_transaction_oneoff(telegram_id: int, transaction_id: int, is_oneof
             UPDATE transactions SET is_oneoff = $3
             WHERE id = $1 AND telegram_id = $2
         """, transaction_id, telegram_id, is_oneoff)
+        return result != "UPDATE 0"
+
+
+# ---------- импорт выписок ----------
+
+async def create_import_batch(telegram_id: int, bank: str, filename: str | None) -> int:
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            INSERT INTO import_batches (telegram_id, bank, filename)
+            VALUES ($1, $2, $3)
+            RETURNING id
+        """, telegram_id, bank, filename)
+        return row["id"]
+
+
+async def finalize_import_batch(
+    batch_id: int, total: int, imported: int, reconciled: int, duplicate: int, review: int,
+) -> None:
+    async with _pool.acquire() as conn:
+        await conn.execute("""
+            UPDATE import_batches
+            SET total_rows = $2, imported_rows = $3, reconciled_rows = $4,
+                duplicate_rows = $5, review_rows = $6
+            WHERE id = $1
+        """, batch_id, total, imported, reconciled, duplicate, review)
+
+
+async def find_dedup_candidates(
+    telegram_id: int, type_: str, amount, occurred_at: datetime,
+) -> list[dict]:
+    """Ручные/импортированные записи пользователя с той же суммой в пределах ±1 дня —
+    кандидаты на сверку с строкой выписки, чтобы не задвоить трату."""
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, source, bank, occurred_at
+            FROM transactions
+            WHERE telegram_id = $1 AND type = $2 AND amount = $3
+              AND occurred_at >= $4::timestamptz - INTERVAL '1 day'
+              AND occurred_at <  $4::timestamptz + INTERVAL '1 day'
+        """, telegram_id, type_, amount, occurred_at)
+        return [dict(r) for r in rows]
+
+
+async def add_imported_transaction(
+    telegram_id: int,
+    category_id: int | None,
+    type_: str,
+    amount,
+    description: str | None,
+    occurred_at: datetime,
+    bank: str,
+    raw_description: str,
+    import_batch_id: int,
+    import_hash: str,
+) -> int | None:
+    """Пишет строку выписки как новую транзакцию. None — если такая же уже
+    импортирована раньше (сработал уникальный индекс по import_hash)."""
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            INSERT INTO transactions (
+                telegram_id, category_id, type, amount, description, occurred_at,
+                source, bank, raw_description, import_batch_id, import_hash
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, 'import', $7, $8, $9, $10)
+            ON CONFLICT (telegram_id, import_hash) WHERE import_hash IS NOT NULL DO NOTHING
+            RETURNING id
+        """, telegram_id, category_id, type_, amount, description, occurred_at,
+             bank, raw_description, import_batch_id, import_hash)
+        return row["id"] if row else None
+
+
+async def reconcile_transaction(telegram_id: int, transaction_id: int, bank: str, raw_description: str) -> bool:
+    """Помечает уже существующую ручную запись как подтверждённую выпиской —
+    вместо того чтобы создавать дубликат."""
+    async with _pool.acquire() as conn:
+        result = await conn.execute("""
+            UPDATE transactions
+            SET reconciled = TRUE, bank = $3, raw_description = $4
+            WHERE id = $1 AND telegram_id = $2
+        """, transaction_id, telegram_id, bank, raw_description)
         return result != "UPDATE 0"
 
 

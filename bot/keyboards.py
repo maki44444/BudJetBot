@@ -72,6 +72,25 @@ def goal_contribute_keyboard(goal_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([row, [InlineKeyboardButton("Отмена", callback_data="goalcancel")]])
 
 
+def import_bank_keyboard() -> InlineKeyboardMarkup:
+    """Выбор банка после того, как пользователь прислал файл выписки."""
+    import parsers
+    rows = [
+        [InlineKeyboardButton(p.display_name, callback_data=f"impbank:{code}")]
+        for code, p in parsers.PARSERS.items()
+    ]
+    rows.append([InlineKeyboardButton("Отмена", callback_data="cancel")])
+    return InlineKeyboardMarkup(rows)
+
+
+def import_review_keyboard(options: list[tuple[str, int]]) -> InlineKeyboardMarkup:
+    """options — [(подпись, id похожей записи), ...] для ручной сверки одной строки импорта."""
+    rows = [[InlineKeyboardButton(label, callback_data=f"impuse:{tx_id}")] for label, tx_id in options]
+    rows.append([InlineKeyboardButton("➕ Это новая запись", callback_data="impnew")])
+    rows.append([InlineKeyboardButton("⏭ Пропустить", callback_data="impskip")])
+    return InlineKeyboardMarkup(rows)
+
+
 def confirm_keyboard(yes_data: str, no_data: str = "cancel") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("Да, удалить", callback_data=yes_data),
