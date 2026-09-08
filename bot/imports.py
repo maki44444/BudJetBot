@@ -166,19 +166,20 @@ async def _present_review_item(message, context: ContextTypes.DEFAULT_TYPE):
         options.append((label, c["id"]))
     await message.reply_text(
         "\n".join(lines),
-        reply_markup=keyboards.import_review_keyboard(item["seq"], options),
+        reply_markup=keyboards.import_review_keyboard(item["batch_id"], item["seq"], options),
     )
 
 
 async def handle_review_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     parts = query.data.split(":")
-    action, seq = parts[0], int(parts[1])
+    action, batch_id, seq = parts[0], int(parts[1]), int(parts[2])
     queue = context.chat_data.get("import_review") or []
 
-    # кнопка относится к строке, которая уже обработана (двойное нажатие
-    # или тап по старому сообщению) — иначе решение применилось бы к чужой строке
-    if not queue or queue[0]["seq"] != seq:
+    # кнопка относится к строке, которая уже обработана: двойное нажатие,
+    # тап по старому сообщению или вовсе по прошлому импорту. Без этой проверки
+    # решение применилось бы к текущей голове очереди, то есть к чужой строке.
+    if not queue or queue[0]["batch_id"] != batch_id or queue[0]["seq"] != seq:
         await query.answer("Эта кнопка уже неактуальна", show_alert=True)
         return
     await query.answer()
@@ -188,7 +189,7 @@ async def handle_review_choice(update: Update, context: ContextTypes.DEFAULT_TYP
     uid = update.effective_user.id
 
     if action == "impuse":
-        tx_id = int(parts[2])
+        tx_id = int(parts[3])
         await db.reconcile_transaction(uid, tx_id, item["bank"], row.raw_description, item["hash"])
         await query.edit_message_text("Сверено с существующей записью.")
     elif action == "impnew":

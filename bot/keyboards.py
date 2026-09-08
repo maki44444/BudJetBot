@@ -83,16 +83,18 @@ def import_bank_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def import_review_keyboard(seq: int, options: list[tuple[str, int]]) -> InlineKeyboardMarkup:
+def import_review_keyboard(batch_id: int, seq: int, options: list[tuple[str, int]]) -> InlineKeyboardMarkup:
     """options — [(подпись, id похожей записи), ...] для ручной сверки одной строки импорта.
-    seq — номер строки в пачке импорта: по нему обработчик отличает актуальную
-    кнопку от нажатия по уже обработанному сообщению."""
+
+    В callback зашиты номер партии и номер строки: по ним обработчик отличает
+    актуальную кнопку от нажатия по старому сообщению (в том числе от прошлого
+    импорта) и не применяет решение к чужой строке."""
     rows = [
-        [InlineKeyboardButton(label, callback_data=f"impuse:{seq}:{tx_id}")]
+        [InlineKeyboardButton(label, callback_data=f"impuse:{batch_id}:{seq}:{tx_id}")]
         for label, tx_id in options
     ]
-    rows.append([InlineKeyboardButton("➕ Это новая запись", callback_data=f"impnew:{seq}")])
-    rows.append([InlineKeyboardButton("⏭ Пропустить", callback_data=f"impskip:{seq}")])
+    rows.append([InlineKeyboardButton("➕ Это новая запись", callback_data=f"impnew:{batch_id}:{seq}")])
+    rows.append([InlineKeyboardButton("⏭ Пропустить", callback_data=f"impskip:{batch_id}:{seq}")])
     return InlineKeyboardMarkup(rows)
 
 
