@@ -1,12 +1,18 @@
 """
 Импорт банковских выписок: пользователь присылает файл → выбирает банк →
-парсер (parsers/) разбирает его в список операций → каждая строка сверяется
-с уже существующими записями (дедуп ±1 день по такой же сумме):
-  0 похожих  → новая запись, с автокатегоризацией
-  1 похожая, ручная  → помечаем её сверенной выпиской, дубликат не создаём
-  1 похожая, тоже импортированная → пропускаем как дубликат
-  несколько похожих → откладываем в очередь, спрашиваем пользователя
+парсер (parsers/) разбирает его в список операций → каждая строка проверяется:
+
+  1. хэш строки уже есть в БД  → эта операция импортирована раньше, пропуск
+  2. есть ровно одна ручная НЕ сверенная запись с той же суммой в ±1 день
+     → помечаем её сверенной выпиской, дубликат не создаём
+  3. таких ручных записей несколько → откладываем в очередь, спрашиваем
+  4. иначе → новая запись с автокатегоризацией
+
+Дубли между строками самой выписки ловит только хэш (шаг 1). Раньше на шаге 2
+кандидатами были и импортированные записи, из-за чего две одинаковые покупки
+за день схлопывались в одну и вторая молча терялась.
 """
+import asyncio
 import logging
 
 from telegram import Update
@@ -51,7 +57,9 @@ async def handle_bank_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         tg_file = await context.bot.get_file(pending["file_id"])
         content = bytes(await tg_file.download_as_bytearray())
-        parsed = parser.parse(content, pending["filename"] or "")
+        # разбор синхронный и небыстрый (pdfplumber на десятках страниц) —
+        # уводим в поток, иначе на это время встаёт весь бот
+        parsed = await asyncio.to_thread(parser.parse, content, pending["filename"] or "")
     except NotImplementedError as e:
         await query.message.reply_text(str(e))
         return
@@ -76,16 +84,32 @@ async def _process_batch(message, context, uid, bank_code, bank_label, parsed, f
     imported = reconciled = duplicate = 0
     review_queue = []
 
-    for row in parsed:
-        candidates = await db.find_dedup_candidates(uid, row.type, row.amount, row.occurred_at)
+    for seq, row in enumerate(parsed):
+        import_hash = compute_import_hash(
+            bank_code, row.occurred_at, row.amount, row.raw_description, row.external_id,
+        )
+        if await db.import_hash_exists(uid, import_hash):
+            duplicate += 1
+            continue
 
-        if not candidates:
+        candidates = await db.find_reconcile_candidates(uid, row.type, row.amount, row.occurred_at)
+
+        if len(candidates) == 1:
+            await db.reconcile_transaction(
+                uid, candidates[0]["id"], bank_code, row.raw_description, import_hash,
+            )
+            reconciled += 1
+        elif len(candidates) > 1:
+            review_queue.append({
+                "seq": seq, "row": row, "candidates": candidates,
+                "bank": bank_code, "batch_id": batch_id, "hash": import_hash,
+            })
+        else:
             if row.type not in categories_cache:
                 categories_cache[row.type] = await db.get_categories(uid, row.type)
             cats = categories_cache[row.type]
             guessed = await autocategorize.guess(uid, row.raw_description, row.type, cats)
             category = guessed or await db.find_category_by_name(uid, _FALLBACK_CATEGORY[row.type])
-            import_hash = compute_import_hash(bank_code, row.occurred_at, row.amount, row.raw_description)
             tx_id = await db.add_imported_transaction(
                 uid, category["id"] if category else None, row.type, row.amount,
                 row.raw_description, row.occurred_at, bank_code, row.raw_description,
@@ -96,14 +120,7 @@ async def _process_batch(message, context, uid, bank_code, bank_label, parsed, f
                 if guessed and row.raw_description:
                     await db.remember_category(uid, row.raw_description, guessed["id"])
             else:
-                duplicate += 1  # такая же строка уже импортирована раньше (совпал import_hash)
-        elif len(candidates) == 1 and candidates[0]["source"] == "manual":
-            await db.reconcile_transaction(uid, candidates[0]["id"], bank_code, row.raw_description)
-            reconciled += 1
-        elif len(candidates) == 1:
-            duplicate += 1
-        else:
-            review_queue.append({"row": row, "candidates": candidates, "bank": bank_code, "batch_id": batch_id})
+                duplicate += 1
 
     await db.finalize_import_batch(
         batch_id, len(parsed), imported, reconciled, duplicate, len(review_queue)
@@ -143,39 +160,50 @@ async def _present_review_item(message, context: ContextTypes.DEFAULT_TYPE):
     options = []
     for c in candidates:
         day = c["occurred_at"].astimezone(common.MOSCOW).strftime("%d.%m.%Y")
-        src = "ручная" if c["source"] == "manual" else f"импорт {c['bank']}"
-        label = f"{day} ({src})"
+        desc = f" {c['description']}" if c["description"] else ""
+        label = f"{day}{desc}"[:60]
         lines.append(f"  • {label}")
         options.append((label, c["id"]))
-    await message.reply_text("\n".join(lines), reply_markup=keyboards.import_review_keyboard(options))
+    await message.reply_text(
+        "\n".join(lines),
+        reply_markup=keyboards.import_review_keyboard(item["seq"], options),
+    )
 
 
 async def handle_review_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    parts = query.data.split(":")
+    action, seq = parts[0], int(parts[1])
     queue = context.chat_data.get("import_review") or []
-    if not queue:
-        await query.edit_message_text("Очередь уточнений уже закрыта.")
+
+    # кнопка относится к строке, которая уже обработана (двойное нажатие
+    # или тап по старому сообщению) — иначе решение применилось бы к чужой строке
+    if not queue or queue[0]["seq"] != seq:
+        await query.answer("Эта кнопка уже неактуальна", show_alert=True)
         return
+    await query.answer()
+
     item = queue.pop(0)
     row = item["row"]
     uid = update.effective_user.id
 
-    if query.data.startswith("impuse:"):
-        tx_id = int(query.data.split(":", 1)[1])
-        await db.reconcile_transaction(uid, tx_id, item["bank"], row.raw_description)
+    if action == "impuse":
+        tx_id = int(parts[2])
+        await db.reconcile_transaction(uid, tx_id, item["bank"], row.raw_description, item["hash"])
         await query.edit_message_text("Сверено с существующей записью.")
-    elif query.data == "impnew":
+    elif action == "impnew":
         categories = await db.get_categories(uid, row.type)
         guessed = await autocategorize.guess(uid, row.raw_description, row.type, categories)
         category = guessed or await db.find_category_by_name(uid, _FALLBACK_CATEGORY[row.type])
-        import_hash = compute_import_hash(item["bank"], row.occurred_at, row.amount, row.raw_description)
-        await db.add_imported_transaction(
+        new_id = await db.add_imported_transaction(
             uid, category["id"] if category else None, row.type, row.amount,
             row.raw_description, row.occurred_at, item["bank"], row.raw_description,
-            item["batch_id"], import_hash,
+            item["batch_id"], item["hash"],
         )
-        await query.edit_message_text("Добавлено как новая запись.")
+        await query.edit_message_text(
+            "Добавлено как новая запись." if new_id
+            else "Такая операция уже импортирована — ничего не добавил."
+        )
     else:  # impskip
         await query.edit_message_text("Пропущено.")
 

@@ -154,7 +154,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(reminders.handle_add_hint, pattern=r"^reminder_add$"))
     app.add_handler(CallbackQueryHandler(reminders.handle_no_spend, pattern=r"^reminder_nospend$"))
     app.add_handler(CallbackQueryHandler(imports.handle_bank_choice, pattern=r"^impbank:"))
-    app.add_handler(CallbackQueryHandler(imports.handle_review_choice, pattern=r"^impuse:|^impnew$|^impskip$"))
+    app.add_handler(CallbackQueryHandler(imports.handle_review_choice, pattern=r"^impuse:|^impnew:|^impskip:"))
 
     app.add_handler(MessageHandler(filters.Document.ALL & private, imports.handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & private, route_text))

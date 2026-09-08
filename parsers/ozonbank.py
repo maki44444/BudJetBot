@@ -21,8 +21,12 @@ MOSCOW = pytz.timezone("Europe/Moscow")
 
 _AMOUNT = r"[\d\s ]+[.,]\d{2}"
 
+# Номер документа пишется как "\d+(?:\s+\d+)*", а не "(?:\d+\s*)+": вложенный
+# квантификатор давал катастрофический откат (22 цифры подряд без совпадения
+# дальше по строке — уже 3 секунды на одну попытку, и это блокировало бы бота).
 _RECORD_RE = re.compile(
-    r"(?P<date>\d{2}\.\d{2}\.\d{4})\s+(?P<time>\d{2}:\d{2}:\d{2})\s+(?:\d+\s*)+"
+    r"(?P<date>\d{2}\.\d{2}\.\d{4})\s+(?P<time>\d{2}:\d{2}:\d{2})\s+"
+    r"(?P<doc>\d+(?:\s+\d+)*)\s*"
     r"(?P<desc>.*?)"
     r"(?P<sign>[+\-−])\s*(?P<amount>" + _AMOUNT + r")\s*₽\s*"
     r"[+\-−]\s*" + _AMOUNT + r"\s*₽",
@@ -88,7 +92,9 @@ class OzonBankParser(BankStatementParser):
             )
             amount = _parse_amount(m["amount"])
             type_ = "expense" if m["sign"] in "-−" else "income"
+            # номер документа мог перенестись на новую строку прямо посреди числа
+            external_id = re.sub(r"\s+", "", m["doc"])
             result.append(ParsedTransaction(
-                occurred_at, amount, type_, _clean_description(m["desc"]),
+                occurred_at, amount, type_, _clean_description(m["desc"]), external_id,
             ))
         return result

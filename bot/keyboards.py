@@ -83,11 +83,16 @@ def import_bank_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def import_review_keyboard(options: list[tuple[str, int]]) -> InlineKeyboardMarkup:
-    """options — [(подпись, id похожей записи), ...] для ручной сверки одной строки импорта."""
-    rows = [[InlineKeyboardButton(label, callback_data=f"impuse:{tx_id}")] for label, tx_id in options]
-    rows.append([InlineKeyboardButton("➕ Это новая запись", callback_data="impnew")])
-    rows.append([InlineKeyboardButton("⏭ Пропустить", callback_data="impskip")])
+def import_review_keyboard(seq: int, options: list[tuple[str, int]]) -> InlineKeyboardMarkup:
+    """options — [(подпись, id похожей записи), ...] для ручной сверки одной строки импорта.
+    seq — номер строки в пачке импорта: по нему обработчик отличает актуальную
+    кнопку от нажатия по уже обработанному сообщению."""
+    rows = [
+        [InlineKeyboardButton(label, callback_data=f"impuse:{seq}:{tx_id}")]
+        for label, tx_id in options
+    ]
+    rows.append([InlineKeyboardButton("➕ Это новая запись", callback_data=f"impnew:{seq}")])
+    rows.append([InlineKeyboardButton("⏭ Пропустить", callback_data=f"impskip:{seq}")])
     return InlineKeyboardMarkup(rows)
 
 

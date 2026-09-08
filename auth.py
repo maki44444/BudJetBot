@@ -54,11 +54,17 @@ def issue_session(telegram_id: int) -> str:
 
 
 def read_session(cookie_value: str | None) -> int | None:
-    """Возвращает telegram_id из cookie или None, если сессия невалидна/истекла."""
+    """Возвращает telegram_id из cookie или None, если сессия невалидна/истекла.
+
+    Кука принимается, только если это валидный Fernet-токен: подделать её,
+    подсунув открытый JSON, нельзя."""
     if not cookie_value:
         return None
+    raw = crypto.decrypt(cookie_value)
+    if raw is None:
+        return None
     try:
-        payload = json.loads(crypto.decrypt(cookie_value))
+        payload = json.loads(raw)
     except (ValueError, TypeError):
         return None
     if not isinstance(payload, dict):

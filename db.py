@@ -113,10 +113,6 @@ async def _create_tables() -> None:
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS oneoff_threshold NUMERIC(12,2) NOT NULL DEFAULT 10000"
         )
         await conn.execute("""
-            ALTER TABLE budgets ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'manual'
-            CHECK (mode IN ('manual', 'auto'))
-        """)
-        await conn.execute("""
             CREATE TABLE IF NOT EXISTS budgets (
                 id          SERIAL PRIMARY KEY,
                 telegram_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
@@ -126,6 +122,12 @@ async def _create_tables() -> None:
                 created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 UNIQUE (telegram_id, category_id, period)
             )
+        """)
+        # только после CREATE TABLE budgets: на пустой базе ALTER до создания
+        # таблицы валился с UndefinedTableError и приложение не стартовало
+        await conn.execute("""
+            ALTER TABLE budgets ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'manual'
+            CHECK (mode IN ('manual', 'auto'))
         """)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS limit_alerts (
@@ -557,18 +559,37 @@ async def finalize_import_batch(
         """, batch_id, total, imported, reconciled, duplicate, review)
 
 
-async def find_dedup_candidates(
+async def import_hash_exists(telegram_id: int, import_hash: str) -> bool:
+    """Эта же операция уже импортирована раньше (совпал хэш строки выписки)."""
+    async with _pool.acquire() as conn:
+        return bool(await conn.fetchval("""
+            SELECT EXISTS(
+                SELECT 1 FROM transactions
+                WHERE telegram_id = $1 AND import_hash = $2
+            )
+        """, telegram_id, import_hash))
+
+
+async def find_reconcile_candidates(
     telegram_id: int, type_: str, amount, occurred_at: datetime,
 ) -> list[dict]:
-    """Ручные/импортированные записи пользователя с той же суммой в пределах ±1 дня —
-    кандидаты на сверку с строкой выписки, чтобы не задвоить трату."""
+    """Ручные ещё не сверенные записи с той же суммой в пределах ±1 дня —
+    кандидаты на сверку со строкой выписки.
+
+    Важно, что берутся ТОЛЬКО source='manual' и NOT reconciled:
+      * импортированные строки сюда не попадают — их дубли ловит import_hash,
+        иначе две одинаковые покупки за день схлопывались бы в одну;
+      * уже сверенная ручная запись не может поглотить вторую строку выписки.
+    """
     async with _pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT id, source, bank, occurred_at
+            SELECT id, source, bank, occurred_at, description
             FROM transactions
             WHERE telegram_id = $1 AND type = $2 AND amount = $3
+              AND source = 'manual' AND NOT reconciled
               AND occurred_at >= $4::timestamptz - INTERVAL '1 day'
               AND occurred_at <  $4::timestamptz + INTERVAL '1 day'
+            ORDER BY occurred_at
         """, telegram_id, type_, amount, occurred_at)
         return [dict(r) for r in rows]
 
@@ -601,15 +622,20 @@ async def add_imported_transaction(
         return row["id"] if row else None
 
 
-async def reconcile_transaction(telegram_id: int, transaction_id: int, bank: str, raw_description: str) -> bool:
+async def reconcile_transaction(
+    telegram_id: int, transaction_id: int, bank: str, raw_description: str,
+    import_hash: str | None = None,
+) -> bool:
     """Помечает уже существующую ручную запись как подтверждённую выпиской —
-    вместо того чтобы создавать дубликат."""
+    вместо того чтобы создавать дубликат. Хэш строки выписки записывается сюда же,
+    иначе повторный импорт того же файла создал бы эту операцию заново."""
     async with _pool.acquire() as conn:
         result = await conn.execute("""
             UPDATE transactions
-            SET reconciled = TRUE, bank = $3, raw_description = $4
+            SET reconciled = TRUE, bank = $3, raw_description = $4,
+                import_hash = COALESCE(import_hash, $5)
             WHERE id = $1 AND telegram_id = $2
-        """, transaction_id, telegram_id, bank, raw_description)
+        """, transaction_id, telegram_id, bank, raw_description, import_hash)
         return result != "UPDATE 0"
 
 
@@ -706,6 +732,15 @@ async def get_tracking_days(telegram_id: int) -> float:
             FROM transactions WHERE telegram_id = $1
         """, telegram_id)
         return float(span) if span is not None else 0.0
+
+
+async def count_expenses_since(telegram_id: int, since: datetime) -> int:
+    """Сколько трат записано начиная с момента — мера того, ведётся ли учёт вообще."""
+    async with _pool.acquire() as conn:
+        return int(await conn.fetchval("""
+            SELECT COUNT(*) FROM transactions
+            WHERE telegram_id = $1 AND type = 'expense' AND occurred_at >= $2
+        """, telegram_id, since))
 
 
 async def get_spend_rates(telegram_id: int) -> list[dict]:

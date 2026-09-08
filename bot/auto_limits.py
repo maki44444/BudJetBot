@@ -5,6 +5,7 @@
 приходят пользователю сводкой — молчаливых правок нет.
 """
 import logging
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from telegram.ext import ContextTypes
@@ -25,6 +26,19 @@ async def recalc_auto_limits(context: ContextTypes.DEFAULT_TYPE):
             auto_budgets = [b for b in await db.get_budgets(uid) if b["mode"] == "auto"]
             if not auto_budgets:
                 continue
+
+            # Месяц без записей — это не «стал тратить меньше», а «не вёл учёт».
+            # Пересчитывать по такому периоду нельзя: лимиты уедут вниз, и при
+            # возвращении к обычным тратам посыплются ложные предупреждения.
+            since = datetime.now(common.MOSCOW) - timedelta(days=smartlimits.ACTIVITY_WINDOW_DAYS)
+            recent = await db.count_expenses_since(uid, since)
+            if recent < smartlimits.MIN_ACTIVITY_TX:
+                logger.info(
+                    "Автолимиты для %s не пересчитаны: за %s дней всего %s трат",
+                    uid, smartlimits.ACTIVITY_WINDOW_DAYS, recent,
+                )
+                continue
+
             rates = {r["category_id"]: r["monthly_est"] for r in await db.get_spend_rates(uid)}
             # молодой учёт: оценки ещё грубые — даём лимитам прыгнуть сразу к среднему
             snap = await db.get_tracking_days(uid) < smartlimits.YOUNG_DATA_DAYS

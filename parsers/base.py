@@ -7,10 +7,14 @@ from decimal import Decimal
 
 @dataclass
 class ParsedTransaction:
-    occurred_at: datetime   # обязательно timezone-aware (МСК — common.MOSCOW)
-    amount: Decimal          # всегда положительная
-    type: str                 # 'expense' | 'income'
-    raw_description: str      # как в выписке — идёт в память категорий и историю
+    occurred_at: datetime    # обязательно timezone-aware (МСК — common.MOSCOW)
+    amount: Decimal           # всегда положительная
+    type: str                  # 'expense' | 'income'
+    raw_description: str       # как в выписке — идёт в память категорий и историю
+    external_id: str | None = None
+    """Номер операции по версии банка (колонка «Документ» и аналоги).
+    Если банк его даёт, именно он делает строку уникальной: две одинаковые
+    покупки в один день на одну сумму различаются только по нему."""
 
 
 class BankStatementParser(ABC):
