@@ -58,7 +58,8 @@ def _clean_description(text: str) -> str:
 
     m = re.match(r"^Снятие наличных денежных средств по карте \S+ сумма [\d.,\s]+ в (.+?)\s+дата\s", text)
     if m:
-        return f"Снятие наличных {re.sub(r'\s+[A-Z]{2,3}$', '', m.group(1).strip())}"[:120]
+        place = re.sub(r"\s+[A-Z]{2,3}$", "", m.group(1).strip())
+        return f"Снятие наличных {place}"[:120]
 
     if text.startswith("Комиссия за"):
         return re.sub(r",?\s*без НДС.*$", "", text, flags=re.IGNORECASE).strip()[:120]
