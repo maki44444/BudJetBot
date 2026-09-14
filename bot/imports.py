@@ -87,7 +87,8 @@ async def _process_batch(message, context, uid, bank_code, bank_label, parsed, f
 
     for seq, row in enumerate(parsed):
         import_hash = compute_import_hash(
-            bank_code, row.occurred_at, row.amount, row.raw_description, row.external_id,
+            bank_code, row.occurred_at, row.amount, row.raw_description,
+            row.external_id, row.type,
         )
         if await db.import_hash_exists(uid, import_hash):
             duplicate += 1
