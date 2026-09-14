@@ -109,7 +109,12 @@ async def _process_batch(message, context, uid, bank_code, bank_label, parsed, f
             if row.type not in categories_cache:
                 categories_cache[row.type] = await db.get_categories(uid, row.type)
             cats = categories_cache[row.type]
-            guessed = await autocategorize.guess(uid, row.raw_description, row.type, cats)
+            # Переводы между своими счетами не участвуют ни в одной сводке,
+            # поэтому категорию для них не угадываем: на реальных выписках это
+            # 261 запрос к ИИ из 682 — впустую и прямиком в лимиты бесплатного API
+            guessed = None
+            if not row.is_transfer:
+                guessed = await autocategorize.guess(uid, row.raw_description, row.type, cats)
             category = guessed or await db.find_category_by_name(uid, _FALLBACK_CATEGORY[row.type])
             tx_id = await db.add_imported_transaction(
                 uid, category["id"] if category else None, row.type, row.amount,
