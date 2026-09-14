@@ -47,13 +47,14 @@ async def handle_bank_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not pending:
         await query.edit_message_text("Сессия истекла — пришли файл ещё раз.")
         return
-    parser = parsers.get_parser(bank_code)
+    uid = update.effective_user.id
+    settings = await db.get_user_settings(uid)
+    parser = parsers.get_parser(bank_code, own_phones=db.parse_own_phones(settings.get("own_phones")))
     if not parser:
         await query.edit_message_text("Банк не распознан.")
         return
 
     await query.edit_message_text(f"Разбираю файл ({parser.display_name})…")
-    uid = update.effective_user.id
     try:
         tg_file = await context.bot.get_file(pending["file_id"])
         content = bytes(await tg_file.download_as_bytearray())
@@ -81,7 +82,7 @@ async def handle_bank_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def _process_batch(message, context, uid, bank_code, bank_label, parsed, filename):
     batch_id = await db.create_import_batch(uid, bank_code, filename)
     categories_cache: dict[str, list[dict]] = {}
-    imported = reconciled = duplicate = 0
+    imported = reconciled = duplicate = transfers = 0
     review_queue = []
 
     for seq, row in enumerate(parsed):
@@ -113,11 +114,13 @@ async def _process_batch(message, context, uid, bank_code, bank_label, parsed, f
             tx_id = await db.add_imported_transaction(
                 uid, category["id"] if category else None, row.type, row.amount,
                 row.raw_description, row.occurred_at, bank_code, row.raw_description,
-                batch_id, import_hash,
+                batch_id, import_hash, row.is_transfer,
             )
             if tx_id:
                 imported += 1
-                if guessed and row.raw_description:
+                if row.is_transfer:
+                    transfers += 1
+                elif guessed and row.raw_description:
                     await db.remember_category(uid, row.raw_description, guessed["id"])
             else:
                 duplicate += 1
@@ -129,6 +132,8 @@ async def _process_batch(message, context, uid, bank_code, bank_label, parsed, f
     lines = [f"Импорт из {bank_label} завершён — строк в файле: {len(parsed)}."]
     if imported:
         lines.append(f"✅ Новых записей: {imported}")
+    if transfers:
+        lines.append(f"🔁 Из них переводов между своими счетами: {transfers} (в тратах не учтены)")
     if reconciled:
         lines.append(f"🔗 Сверено с ручными записями: {reconciled}")
     if duplicate:
@@ -199,7 +204,7 @@ async def handle_review_choice(update: Update, context: ContextTypes.DEFAULT_TYP
         new_id = await db.add_imported_transaction(
             uid, category["id"] if category else None, row.type, row.amount,
             row.raw_description, row.occurred_at, item["bank"], row.raw_description,
-            item["batch_id"], item["hash"],
+            item["batch_id"], item["hash"], row.is_transfer,
         )
         await query.edit_message_text(
             "Добавлено как новая запись." if new_id

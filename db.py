@@ -112,6 +112,12 @@ async def _create_tables() -> None:
         await conn.execute(
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS oneoff_threshold NUMERIC(12,2) NOT NULL DEFAULT 10000"
         )
+        await conn.execute(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS own_phones TEXT NOT NULL DEFAULT ''"
+        )
+        await conn.execute(
+            "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS is_transfer BOOLEAN NOT NULL DEFAULT FALSE"
+        )
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS budgets (
                 id          SERIAL PRIMARY KEY,
@@ -264,11 +270,12 @@ async def get_user_by_username(username: str) -> int | None:
 async def get_user_settings(telegram_id: int) -> dict:
     async with _pool.acquire() as conn:
         row = await conn.fetchrow("""
-            SELECT oneoff_threshold, reminder_enabled, reminder_hour
+            SELECT oneoff_threshold, reminder_enabled, reminder_hour, own_phones
             FROM users WHERE telegram_id = $1
         """, telegram_id)
         if not row:
-            return {"oneoff_threshold": 10000, "reminder_enabled": True, "reminder_hour": 21}
+            return {"oneoff_threshold": 10000, "reminder_enabled": True,
+                    "reminder_hour": 21, "own_phones": ""}
         return dict(row)
 
 
@@ -276,6 +283,7 @@ async def update_user_settings(
     telegram_id: int,
     oneoff_threshold=None,
     reminder_enabled: bool | None = None,
+    own_phones: str | None = None,
 ) -> None:
     async with _pool.acquire() as conn:
         if oneoff_threshold is not None:
@@ -288,6 +296,20 @@ async def update_user_settings(
                 "UPDATE users SET reminder_enabled = $1 WHERE telegram_id = $2",
                 reminder_enabled, telegram_id,
             )
+        if own_phones is not None:
+            await conn.execute(
+                "UPDATE users SET own_phones = $1 WHERE telegram_id = $2",
+                own_phones, telegram_id,
+            )
+
+
+def parse_own_phones(raw: str | None) -> set[str]:
+    """Строка настроек «+7 996 593-36-13, 79991234567» -> {'79965933613', ...}."""
+    from parsers.identity import normalize_phone
+    if not raw:
+        return set()
+    phones = {normalize_phone(part) for part in re.split(r"[,;\n]+", raw)}
+    return {p for p in phones if len(p) >= 10}
 
 
 async def get_reminder_candidates() -> list[int]:
@@ -436,6 +458,7 @@ async def get_category_breakdown(telegram_id: int, start: datetime, end: datetim
             FROM transactions t
             JOIN categories c ON c.id = t.category_id
             WHERE t.telegram_id = $1 AND t.type = $2 AND t.occurred_at >= $3 AND t.occurred_at < $4
+              AND NOT t.is_transfer
             GROUP BY c.id, c.name, c.icon
             ORDER BY total DESC
         """, telegram_id, type_, start, end)
@@ -507,7 +530,8 @@ async def get_transactions_page(
         args += [limit, offset]
         rows = await conn.fetch(f"""
             SELECT t.id, t.type, t.amount, t.description, t.occurred_at, t.source,
-                   t.is_oneoff, t.category_id, c.name AS category_name, c.icon AS category_icon
+                   t.is_oneoff, t.is_transfer, t.category_id,
+                   c.name AS category_name, c.icon AS category_icon
             FROM transactions t
             LEFT JOIN categories c ON c.id = t.category_id
             WHERE {where}
@@ -523,6 +547,17 @@ async def update_transaction_category(telegram_id: int, transaction_id: int, cat
             UPDATE transactions SET category_id = $3
             WHERE id = $1 AND telegram_id = $2
         """, transaction_id, telegram_id, category_id)
+        return result != "UPDATE 0"
+
+
+async def set_transaction_transfer(telegram_id: int, transaction_id: int, is_transfer: bool) -> bool:
+    """Пометить запись переводом между своими счетами (или снять пометку).
+    Такие записи остаются в истории, но выпадают из сумм, категорий и лимитов."""
+    async with _pool.acquire() as conn:
+        result = await conn.execute("""
+            UPDATE transactions SET is_transfer = $3
+            WHERE id = $1 AND telegram_id = $2
+        """, transaction_id, telegram_id, is_transfer)
         return result != "UPDATE 0"
 
 
@@ -605,6 +640,7 @@ async def add_imported_transaction(
     raw_description: str,
     import_batch_id: int,
     import_hash: str,
+    is_transfer: bool = False,
 ) -> int | None:
     """Пишет строку выписки как новую транзакцию. None — если такая же уже
     импортирована раньше (сработал уникальный индекс по import_hash)."""
@@ -612,13 +648,13 @@ async def add_imported_transaction(
         row = await conn.fetchrow("""
             INSERT INTO transactions (
                 telegram_id, category_id, type, amount, description, occurred_at,
-                source, bank, raw_description, import_batch_id, import_hash
+                source, bank, raw_description, import_batch_id, import_hash, is_transfer
             )
-            VALUES ($1, $2, $3, $4, $5, $6, 'import', $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, 'import', $7, $8, $9, $10, $11)
             ON CONFLICT (telegram_id, import_hash) WHERE import_hash IS NOT NULL DO NOTHING
             RETURNING id
         """, telegram_id, category_id, type_, amount, description, occurred_at,
-             bank, raw_description, import_batch_id, import_hash)
+             bank, raw_description, import_batch_id, import_hash, is_transfer)
         return row["id"] if row else None
 
 
@@ -648,6 +684,7 @@ async def get_daily_totals(telegram_id: int, start: datetime, end: datetime) -> 
                    COALESCE(SUM(amount) FILTER (WHERE type = 'income'), 0) AS income
             FROM transactions
             WHERE telegram_id = $1 AND occurred_at >= $2 AND occurred_at < $3
+              AND NOT is_transfer
             GROUP BY day
             ORDER BY day
         """, telegram_id, start, end)
@@ -667,6 +704,7 @@ async def get_top_expenses(telegram_id: int, start: datetime, end: datetime, lim
             LEFT JOIN categories c ON c.id = t.category_id
             WHERE t.telegram_id = $1 AND t.type = 'expense'
               AND t.occurred_at >= $2 AND t.occurred_at < $3
+              AND NOT t.is_transfer
             ORDER BY t.amount DESC, t.occurred_at DESC
             LIMIT $4
         """, telegram_id, start, end, limit)
@@ -683,6 +721,7 @@ async def get_totals(telegram_id: int, start: datetime, end: datetime) -> dict:
                 COALESCE(SUM(amount) FILTER (WHERE type = 'expense' AND is_oneoff), 0) AS expense_oneoff
             FROM transactions
             WHERE telegram_id = $1 AND occurred_at >= $2 AND occurred_at < $3
+              AND NOT is_transfer
         """, telegram_id, start, end)
         return {
             "expense": row["expense"],
@@ -740,6 +779,7 @@ async def count_expenses_since(telegram_id: int, since: datetime) -> int:
         return int(await conn.fetchval("""
             SELECT COUNT(*) FROM transactions
             WHERE telegram_id = $1 AND type = 'expense' AND occurred_at >= $2
+              AND NOT is_transfer
         """, telegram_id, since))
 
 
@@ -759,6 +799,7 @@ async def get_spend_rates(telegram_id: int) -> list[dict]:
             FROM transactions t
             JOIN categories c ON c.id = t.category_id
             WHERE t.telegram_id = $1 AND t.type = 'expense' AND NOT t.is_oneoff
+              AND NOT t.is_transfer
               AND t.occurred_at >= NOW() - INTERVAL '90 days'
             GROUP BY c.id, c.name, c.icon
             ORDER BY total DESC
@@ -789,6 +830,7 @@ async def get_budget_progress(telegram_id: int, start: datetime, end: datetime) 
             LEFT JOIN transactions t ON t.category_id = b.category_id
                 AND t.telegram_id = b.telegram_id
                 AND t.type = 'expense'
+                AND NOT t.is_transfer
                 AND t.occurred_at >= $2 AND t.occurred_at < $3
             WHERE b.telegram_id = $1
             GROUP BY c.id, c.name, c.icon, b.amount, b.mode

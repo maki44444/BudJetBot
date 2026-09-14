@@ -16,8 +16,13 @@ import pdfplumber
 import pytz
 
 from .base import BankStatementParser, ParsedTransaction
+from .identity import is_same_person
 
 MOSCOW = pytz.timezone("Europe/Moscow")
+
+_OWNER_RE = re.compile(r"Владелец:\s*([А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ][а-яё]+){1,2})")
+# перенос слова по строкам: «смс-\nинформирование», «UFS-\nONLINE»
+_HYPHEN_WRAP_RE = re.compile(r"(\w)-\s+(\w)")
 
 _AMOUNT = r"[\d\s ]+[.,]\d{2}"
 
@@ -44,11 +49,19 @@ def _parse_amount(raw: str) -> Decimal:
 def _clean_description(text: str) -> str:
     """Достаёт из "Назначение платежа" короткую суть - контрагента/магазин,
     без служебных СБП-кодов, дат и "Без НДС". Не узнал формат - возвращает как есть."""
-    text = _WS_RE.sub(" ", text).strip().rstrip(".")
+    text = _HYPHEN_WRAP_RE.sub(r"\1-\2", _WS_RE.sub(" ", text).strip()).rstrip(".")
 
-    m = re.match(r"^Оплата товаров по карте \S+ сумма [\d.,\s]+ в (.+?)\s+дата\s", text)
+    m = re.match(r"^(Возврат оплаты|Оплата) товаров по карте \S+ сумма [\d.,\s]+ в (.+?)\s+дата\s", text)
     if m:
-        return re.sub(r"\s+[A-Z]{2,3}$", "", m.group(1).strip())
+        merchant = re.sub(r"\s+[A-Z]{2,3}$", "", m.group(2).strip())
+        return f"Возврат {merchant}"[:120] if m.group(1) == "Возврат оплаты" else merchant
+
+    m = re.match(r"^Снятие наличных денежных средств по карте \S+ сумма [\d.,\s]+ в (.+?)\s+дата\s", text)
+    if m:
+        return f"Снятие наличных {re.sub(r'\s+[A-Z]{2,3}$', '', m.group(1).strip())}"[:120]
+
+    if text.startswith("Комиссия за"):
+        return re.sub(r",?\s*без НДС.*$", "", text, flags=re.IGNORECASE).strip()[:120]
 
     m = re.match(r"^Перевод .*?через СБП\.\s*(?:Получатель|Отправитель): (.+?)\.\s*Без НДС", text)
     if m:
@@ -76,6 +89,16 @@ def _clean_description(text: str) -> str:
     return text[:120]
 
 
+def _is_self_transfer(raw_desc: str, owner: str) -> bool:
+    """Перевод самому себе: внутреннее движение по своим продуктам Ozon либо
+    СБП-перевод, где получатель или отправитель — сам владелец счёта."""
+    text = _HYPHEN_WRAP_RE.sub(r"\1-\2", _WS_RE.sub(" ", raw_desc))
+    if "Перевод собственных средств" in text:
+        return True
+    m = re.search(r"(?:Получатель|Отправитель):\s*([^.]+)", text)
+    return bool(m and is_same_person(m.group(1), owner))
+
+
 class OzonBankParser(BankStatementParser):
     bank_code = "ozon"
     display_name = "Ozon Банк"
@@ -84,6 +107,11 @@ class OzonBankParser(BankStatementParser):
     def parse(self, content: bytes, filename: str) -> list[ParsedTransaction]:
         with pdfplumber.open(BytesIO(content)) as pdf:
             full_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+        return self._parse_text(full_text)
+
+    def _parse_text(self, full_text: str) -> list[ParsedTransaction]:
+        owner_match = _OWNER_RE.search(full_text)
+        owner = owner_match.group(1) if owner_match else ""
 
         result = []
         for m in _RECORD_RE.finditer(full_text):
@@ -96,5 +124,6 @@ class OzonBankParser(BankStatementParser):
             external_id = re.sub(r"\s+", "", m["doc"])
             result.append(ParsedTransaction(
                 occurred_at, amount, type_, _clean_description(m["desc"]), external_id,
+                _is_self_transfer(m["desc"], owner),
             ))
         return result

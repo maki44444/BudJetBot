@@ -22,7 +22,7 @@ createApp({
       filterCategory: null,
       categories: { expense: [], income: [] },
       limitDrafts: {},
-      settings: { oneoff_threshold: null, reminder_enabled: true },
+      settings: { oneoff_threshold: null, reminder_enabled: true, own_phones: "" },
       suggest: null,     // предпросмотр автоподбора лимитов
       suggestDays: 0,    // сколько дней ведётся учёт (для предупреждения)
       theme: document.documentElement.dataset.theme || "light",
@@ -263,6 +263,15 @@ createApp({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       });
+    },
+    async toggleTransfer(t) {
+      await this.api(`/api/transactions/${t.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_transfer: !t.is_transfer }),
+      });
+      t.is_transfer = !t.is_transfer;
+      await this.loadSummary();  // суммы, категории и лимиты пересчитываются
     },
     async toggleOneoff(t) {
       await this.api(`/api/transactions/${t.id}`, {

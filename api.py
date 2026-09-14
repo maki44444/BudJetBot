@@ -192,11 +192,12 @@ async def api_transactions(
 class TxPatch(BaseModel):
     category_id: int | None = None
     is_oneoff: bool | None = None
+    is_transfer: bool | None = None
 
 
 @app.patch("/api/transactions/{tx_id}")
 async def api_update_transaction(tx_id: int, body: TxPatch, uid: int = Depends(get_current_user)):
-    if body.category_id is None and body.is_oneoff is None:
+    if body.category_id is None and body.is_oneoff is None and body.is_transfer is None:
         raise HTTPException(status_code=400, detail="Нечего менять")
     if body.category_id is not None:
         category = await db.get_category(body.category_id)
@@ -206,6 +207,9 @@ async def api_update_transaction(tx_id: int, body: TxPatch, uid: int = Depends(g
             raise HTTPException(status_code=404, detail="Запись не найдена")
     if body.is_oneoff is not None:
         if not await db.set_transaction_oneoff(uid, tx_id, body.is_oneoff):
+            raise HTTPException(status_code=404, detail="Запись не найдена")
+    if body.is_transfer is not None:
+        if not await db.set_transaction_transfer(uid, tx_id, body.is_transfer):
             raise HTTPException(status_code=404, detail="Запись не найдена")
     return {"ok": True}
 
@@ -234,11 +238,12 @@ async def api_get_settings(uid: int = Depends(get_current_user)):
 class SettingsPatch(BaseModel):
     oneoff_threshold: float | None = None
     reminder_enabled: bool | None = None
+    own_phones: str | None = None
 
 
 @app.patch("/api/settings")
 async def api_patch_settings(body: SettingsPatch, uid: int = Depends(get_current_user)):
-    if body.oneoff_threshold is None and body.reminder_enabled is None:
+    if body.oneoff_threshold is None and body.reminder_enabled is None and body.own_phones is None:
         raise HTTPException(status_code=400, detail="Нечего менять")
     if body.oneoff_threshold is not None and body.oneoff_threshold <= 0:
         raise HTTPException(status_code=400, detail="Порог должен быть больше нуля")
@@ -246,6 +251,7 @@ async def api_patch_settings(body: SettingsPatch, uid: int = Depends(get_current
         uid,
         oneoff_threshold=Decimal(str(body.oneoff_threshold)) if body.oneoff_threshold is not None else None,
         reminder_enabled=body.reminder_enabled,
+        own_phones=body.own_phones,
     )
     return {"ok": True}
 

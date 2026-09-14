@@ -177,16 +177,19 @@
                 </optgroup>
               </select>
               <span v-if="t.description" class="muted small">{{ t.description }}</span>
+              <span v-if="t.is_transfer" class="muted small">· перевод себе</span>
             </td>
             <td class="tx-amount" :class="{'delta-good': t.type==='income'}">
               {{ t.type==='income' ? '+' : '−' }}{{ fmt(t.amount) }} ₽
             </td>
-            <td class="tx-oneoff" v-if="t.type==='expense'">
-              <button class="icon-btn oneoff-btn" :class="{active: t.is_oneoff}"
+            <td class="tx-oneoff">
+              <button class="icon-btn oneoff-btn" :class="{active: t.is_transfer}"
+                      @click="toggleTransfer(t)"
+                      :title="t.is_transfer ? 'Перевод между своими счетами — вне трат и лимитов' : 'Пометить как перевод между своими счетами'">🔁</button>
+              <button v-if="t.type==='expense'" class="icon-btn oneoff-btn" :class="{active: t.is_oneoff}"
                       @click="toggleOneoff(t)"
                       :title="t.is_oneoff ? 'Разовая — не учитывается в прогнозе' : 'Пометить как разовую'">⚡</button>
             </td>
-            <td class="tx-oneoff" v-else></td>
             <td class="tx-del">
               <button class="icon-btn" @click="removeTx(t)" aria-label="Удалить запись">✕</button>
             </td>
@@ -214,6 +217,20 @@
         <div class="limit-edit">
           <input type="number" min="1" step="500" v-model.number="settings.oneoff_threshold">
           <button class="ghost-btn" @click="saveSettings({oneoff_threshold: settings.oneoff_threshold})">Сохранить</button>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-desc">
+          <div>Свои телефоны для СБП</div>
+          <div class="muted small">
+            Через запятую. По ним импорт выписок отличает перевод на свой же счёт
+            в другом банке от перевода другому человеку: в выписке там указан
+            только номер. Такие переводы не попадают в траты и лимиты.
+          </div>
+        </div>
+        <div class="limit-edit">
+          <input type="text" placeholder="+7 999 123-45-67" v-model="settings.own_phones">
+          <button class="ghost-btn" @click="saveSettings({own_phones: settings.own_phones})">Сохранить</button>
         </div>
       </div>
       <div class="setting-row">
