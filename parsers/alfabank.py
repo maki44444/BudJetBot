@@ -22,6 +22,7 @@ import pytz
 
 from .base import BankStatementParser, ParsedTransaction
 from .identity import is_same_person
+from .layout import group_lines, line_text
 
 MOSCOW = pytz.timezone("Europe/Moscow")
 
@@ -45,6 +46,35 @@ _FURNITURE = (
 _WS_RE = re.compile(r"\s+")
 # перенос по строкам: «593-36-\n13», «SM-\nKLINIKA»
 _HYPHEN_WRAP_RE = re.compile(r"(\w)-\s+(\w)")
+
+
+_DATE_ONLY_RE = re.compile(r"^\d{2}\.\d{2}\.\d{4}$")
+# продолжение описания начинается ровно с левого края своей колонки
+_COLUMN_TOLERANCE = 3.0
+
+
+def _page_records(page) -> list[dict]:
+    """Записи одной страницы. Строка операции опознаётся по дате в первой
+    колонке, продолжение описания — по левому краю колонки «Описание».
+    Подпись уполномоченного лица стоит в другой колонке и не приклеивается."""
+    records: list[dict] = []
+    current: dict | None = None
+    for words in group_lines(page):
+        text = line_text(words)
+        m = _RECORD_RE.match(text)
+        if m and _DATE_ONLY_RE.match(words[0]["text"]):
+            current = {
+                "date": m["date"], "code": m["code"], "desc": [m["desc"]],
+                "sign": m["sign"], "amount": m["amount"],
+                "x0": words[2]["x0"] if len(words) > 2 else None,
+            }
+            records.append(current)
+        elif (current and current["x0"] is not None
+                and abs(words[0]["x0"] - current["x0"]) <= _COLUMN_TOLERANCE):
+            current["desc"].append(text)
+        else:
+            current = None
+    return records
 
 
 def _parse_amount(raw: str) -> Decimal:
@@ -116,9 +146,29 @@ class AlfaBankParser(BankStatementParser):
     supported_extensions = (".pdf",)
 
     def parse(self, content: bytes, filename: str) -> list[ParsedTransaction]:
+        records, texts = [], []
         with pdfplumber.open(BytesIO(content)) as pdf:
-            text = "\n".join(page.extract_text() or "" for page in pdf.pages)
-        return self._parse_text(text)
+            for page in pdf.pages:
+                texts.append(page.extract_text() or "")
+                records.extend(_page_records(page))
+        text = "\n".join(texts)
+
+        # Сумма стоит посреди предложения, а хвост описания уезжает на следующую
+        # строку — в плоском тексте он теряется вместе с концом номера телефона,
+        # и СБП-перевод самому себе перестаёт распознаваться. Поэтому основной
+        # путь — по координатам, разбор текста остаётся запасным.
+        if not records:
+            return self._parse_text(text)
+
+        owner_match = _OWNER_RE.search(text)
+        owner = owner_match.group(1) if owner_match else ""
+        result = []
+        for rec in records:
+            tx = self._build(rec["date"], rec["code"], " ".join(rec["desc"]),
+                             rec["sign"], rec["amount"], owner)
+            if tx:
+                result.append(tx)
+        return result
 
     def _parse_text(self, text: str) -> list[ParsedTransaction]:
         owner_match = _OWNER_RE.search(text)
@@ -126,20 +176,27 @@ class AlfaBankParser(BankStatementParser):
 
         result = []
         for m in _RECORD_RE.finditer(text):
-            raw_desc = _WS_RE.sub(" ", m["desc"]).strip()
-            # неподтверждённые операции (строка HOLD) пропускаем: они ещё могут
-            # не состояться, а позже придут настоящей проводкой и задвоятся
-            if "Неподтвержденная операция" in raw_desc:
-                continue
-            occurred_at = MOSCOW.localize(
-                datetime.strptime(f"{m['date']} 12:00", "%d.%m.%Y %H:%M")
-            )
-            result.append(ParsedTransaction(
-                occurred_at,
-                _parse_amount(m["amount"]),
-                "expense" if m["sign"] == "-" else "income",
-                _clean_description(raw_desc),
-                f"{m['date']}-{m['code']}",
-                _is_self_transfer(raw_desc, owner, self.own_phones),
-            ))
+            tx = self._build(m["date"], m["code"], m["desc"],
+                             m["sign"], m["amount"], owner)
+            if tx:
+                result.append(tx)
         return result
+
+    def _build(self, date: str, code: str, raw_desc: str, sign: str,
+               amount: str, owner: str) -> ParsedTransaction | None:
+        raw_desc = _WS_RE.sub(" ", raw_desc).strip()
+        # неподтверждённые операции (строка HOLD) пропускаем: они ещё могут
+        # не состояться, а позже придут настоящей проводкой и задвоятся
+        if "Неподтвержденная операция" in raw_desc:
+            return None
+        occurred_at = MOSCOW.localize(
+            datetime.strptime(f"{date} 12:00", "%d.%m.%Y %H:%M")
+        )
+        return ParsedTransaction(
+            occurred_at,
+            _parse_amount(amount),
+            "expense" if sign == "-" else "income",
+            _clean_description(raw_desc),
+            f"{date}-{code}",
+            _is_self_transfer(raw_desc, owner, self.own_phones),
+        )

@@ -40,6 +40,17 @@ _RECORD_RE = re.compile(
 
 _WS_RE = re.compile(r"\s+")
 
+# Ячейки таблицы: дата с временем в первой колонке, сумма со знаком — в четвёртой
+_CELL_DT_RE = re.compile(r"^(\d{2}\.\d{2}\.\d{4})\s+(\d{2}:\d{2}:\d{2})$")
+_CELL_AMOUNT_RE = re.compile(
+    r"^(?P<sign>[+\-−])\s*(?P<amount>" + _AMOUNT + r")\s*₽$"
+)
+
+
+def _cell_datetime(cell: str | None) -> tuple[str, str] | None:
+    m = _CELL_DT_RE.match(_WS_RE.sub(" ", cell or "").strip())
+    return (m.group(1), m.group(2)) if m else None
+
 
 def _parse_amount(raw: str) -> Decimal:
     cleaned = raw.replace(" ", "").replace(" ", "").replace(",", ".")
@@ -106,9 +117,42 @@ class OzonBankParser(BankStatementParser):
     supported_extensions = (".pdf",)
 
     def parse(self, content: bytes, filename: str) -> list[ParsedTransaction]:
+        rows, texts = [], []
         with pdfplumber.open(BytesIO(content)) as pdf:
-            full_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
-        return self._parse_text(full_text)
+            for page in pdf.pages:
+                texts.append(page.extract_text() or "")
+                for table in page.extract_tables():
+                    rows.extend(table)
+        full_text = "\n".join(texts)
+
+        # В плоском тексте назначение платежа рвётся на несколько строк, и от
+        # описания остаётся первый обрывок («Оплата товаров по»). Колонки таблицы
+        # отдают его целиком, поэтому основной путь — таблица, а разбор текста
+        # остаётся запасным на случай незнакомой вёрстки.
+        cells = [r for r in rows if len(r) >= 4 and _cell_datetime(r[0])]
+        if not cells:
+            return self._parse_text(full_text)
+
+        owner_match = _OWNER_RE.search(full_text)
+        owner = owner_match.group(1) if owner_match else ""
+
+        result, broken = [], 0
+        for row in cells:
+            date, time = _cell_datetime(row[0])
+            amount_match = _CELL_AMOUNT_RE.match(_WS_RE.sub(" ", row[3] or "").strip())
+            if not amount_match:
+                broken += 1
+                continue
+            result.append(self._build(
+                date, time,
+                # номер документа переносится на новую строку прямо посреди числа
+                re.sub(r"\D", "", row[1] or ""),
+                row[2] or "", amount_match["sign"], amount_match["amount"], owner,
+            ))
+        if broken:
+            # молча терять операции нельзя — лучше честно не разобрать файл
+            raise ValueError(f"не удалось прочитать сумму в {broken} строк(ах) выписки")
+        return result
 
     def _parse_text(self, full_text: str) -> list[ParsedTransaction]:
         owner_match = _OWNER_RE.search(full_text)
@@ -116,15 +160,22 @@ class OzonBankParser(BankStatementParser):
 
         result = []
         for m in _RECORD_RE.finditer(full_text):
-            occurred_at = MOSCOW.localize(
-                datetime.strptime(f"{m['date']} {m['time']}", "%d.%m.%Y %H:%M:%S")
-            )
-            amount = _parse_amount(m["amount"])
-            type_ = "expense" if m["sign"] in "-−" else "income"
-            # номер документа мог перенестись на новую строку прямо посреди числа
-            external_id = re.sub(r"\s+", "", m["doc"])
-            result.append(ParsedTransaction(
-                occurred_at, amount, type_, _clean_description(m["desc"]), external_id,
-                _is_self_transfer(m["desc"], owner),
+            result.append(self._build(
+                m["date"], m["time"], re.sub(r"\s+", "", m["doc"]),
+                m["desc"], m["sign"], m["amount"], owner,
             ))
         return result
+
+    def _build(self, date: str, time: str, doc: str, raw_desc: str,
+               sign: str, amount: str, owner: str) -> ParsedTransaction:
+        occurred_at = MOSCOW.localize(
+            datetime.strptime(f"{date} {time}", "%d.%m.%Y %H:%M:%S")
+        )
+        return ParsedTransaction(
+            occurred_at,
+            _parse_amount(amount),
+            "expense" if sign in "-−" else "income",
+            _clean_description(raw_desc),
+            doc,
+            _is_self_transfer(raw_desc, owner),
+        )
