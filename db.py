@@ -2,6 +2,7 @@ import asyncpg
 import logging
 import re
 from datetime import date, datetime
+from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +118,12 @@ async def _create_tables() -> None:
         )
         await conn.execute(
             "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS is_transfer BOOLEAN NOT NULL DEFAULT FALSE"
+        )
+        await conn.execute(
+            # Ставится при импорте, когда категорию угадать не удалось и запись
+            # легла в «Другое». Разбор в боте (/sort) группирует такие записи по
+            # описанию, чтобы одно решение закрывало сразу всю группу.
+            "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS needs_category BOOLEAN NOT NULL DEFAULT FALSE"
         )
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS budgets (
@@ -641,6 +648,7 @@ async def add_imported_transaction(
     import_batch_id: int,
     import_hash: str,
     is_transfer: bool = False,
+    needs_category: bool = False,
 ) -> int | None:
     """Пишет строку выписки как новую транзакцию. None — если такая же уже
     импортирована раньше (сработал уникальный индекс по import_hash)."""
@@ -648,14 +656,80 @@ async def add_imported_transaction(
         row = await conn.fetchrow("""
             INSERT INTO transactions (
                 telegram_id, category_id, type, amount, description, occurred_at,
-                source, bank, raw_description, import_batch_id, import_hash, is_transfer
+                source, bank, raw_description, import_batch_id, import_hash,
+                is_transfer, needs_category
             )
-            VALUES ($1, $2, $3, $4, $5, $6, 'import', $7, $8, $9, $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, 'import', $7, $8, $9, $10, $11, $12)
             ON CONFLICT (telegram_id, import_hash) WHERE import_hash IS NOT NULL DO NOTHING
             RETURNING id
         """, telegram_id, category_id, type_, amount, description, occurred_at,
-             bank, raw_description, import_batch_id, import_hash, is_transfer)
+             bank, raw_description, import_batch_id, import_hash, is_transfer,
+             needs_category)
         return row["id"] if row else None
+
+
+async def count_category_groups(telegram_id: int) -> int:
+    """Сколько групп ждёт разбора. Группа — одно описание одного типа."""
+    async with _pool.acquire() as conn:
+        return await conn.fetchval("""
+            SELECT COUNT(*) FROM (
+                SELECT 1 FROM transactions
+                WHERE telegram_id = $1 AND needs_category AND NOT is_transfer
+                  AND description IS NOT NULL AND description <> ''
+                GROUP BY description, type
+            ) g
+        """, telegram_id)
+
+
+async def get_category_groups(telegram_id: int, limit: int = 100) -> list[dict]:
+    """Группы записей без разобранной категории, самые весомые — первыми.
+    Сортировка по сумме, а не по количеству: десять решений по крупным
+    группам закрывают почти все деньги, а мелочь можно не трогать вовсе."""
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT description, type, COUNT(*) AS cnt, SUM(amount) AS total,
+                   MIN(occurred_at) AS first_at, MAX(occurred_at) AS last_at
+            FROM transactions
+            WHERE telegram_id = $1 AND needs_category AND NOT is_transfer
+              AND description IS NOT NULL AND description <> ''
+            GROUP BY description, type
+            ORDER BY SUM(amount) DESC, COUNT(*) DESC
+            LIMIT $2
+        """, telegram_id, limit)
+        return [dict(r) for r in rows]
+
+
+async def assign_category_to_group(
+    telegram_id: int, description: str, type_: str, category_id: int
+) -> tuple[int, Decimal]:
+    """Ставит категорию всем записям группы разом и снимает признак разбора.
+    Возвращает сколько записей затронуто и на какую сумму.
+
+    Выбор сразу уходит в память категорий: это ручное решение пользователя,
+    самый ценный сигнал, и следующий импорт таких же описаний обойдётся без ИИ.
+    Запись в память сделана здесь, а не в боте, чтобы её нельзя было забыть
+    в одном из мест вызова."""
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch("""
+            UPDATE transactions SET category_id = $4, needs_category = FALSE
+            WHERE telegram_id = $1 AND description = $2 AND type = $3
+              AND needs_category AND NOT is_transfer
+            RETURNING amount
+        """, telegram_id, description, type_, category_id)
+    await remember_category(telegram_id, description, category_id)
+    return len(rows), sum((r["amount"] for r in rows), Decimal(0))
+
+
+async def skip_category_group(telegram_id: int, description: str, type_: str) -> int:
+    """Оставляет группе текущую категорию и убирает её из разбора."""
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch("""
+            UPDATE transactions SET needs_category = FALSE
+            WHERE telegram_id = $1 AND description = $2 AND type = $3
+              AND needs_category
+            RETURNING id
+        """, telegram_id, description, type_)
+        return len(rows)
 
 
 async def reconcile_transaction(

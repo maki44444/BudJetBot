@@ -45,6 +45,23 @@ def change_category_keyboard(categories: list[dict], tx_id: int, columns: int = 
     return InlineKeyboardMarkup(rows)
 
 
+def sort_group_keyboard(categories: list[dict], token: int, columns: int = 2) -> InlineKeyboardMarkup:
+    """Выбор категории сразу для всей группы записей (разбор после импорта).
+    token — номер текущей группы: по нему отсекаются нажатия на старые
+    сообщения, иначе выбор уехал бы не в ту группу."""
+    buttons = [
+        InlineKeyboardButton(f"{c['icon']} {c['name']}", callback_data=f"srtc:{token}:{c['id']}")
+        for c in categories
+    ]
+    rows = [buttons[i:i + columns] for i in range(0, len(buttons), columns)]
+    rows.append([InlineKeyboardButton("➕ Новая категория", callback_data=f"srtnew:{token}")])
+    rows.append([
+        InlineKeyboardButton("⏭ Пропустить", callback_data=f"srtskip:{token}"),
+        InlineKeyboardButton("✖️ Закончить", callback_data="srtstop"),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
 def day_delete_keyboard(txs: list[dict], fmt_amount) -> InlineKeyboardMarkup:
     """Кнопка удаления на каждую запись дня + ссылка на сайт."""
     rows = []

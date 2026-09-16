@@ -9,7 +9,7 @@ from telegram.ext import (
 )
 
 import ai
-from . import access, keyboards, common, transactions, categories, limits, limit_alerts, auto_limits, ai_review, goals, imports, reminders, admin
+from . import access, keyboards, common, transactions, categories, limits, limit_alerts, auto_limits, ai_review, goals, imports, reminders, sorting, admin
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 SITE_URL = os.environ.get("SITE_URL", "")
@@ -31,6 +31,7 @@ USER_COMMANDS = [
     BotCommand("goal", "Добавить цель, напр. /goal Отпуск 100000"),
     BotCommand("goals", "Список целей и прогресс"),
     BotCommand("review", "ИИ-разбор трат за месяц"),
+    BotCommand("sort", "Разобрать категории группами"),
 ]
 
 ADMIN_COMMANDS = USER_COMMANDS + [
@@ -110,6 +111,8 @@ async def route_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Подробная аналитика: графики, история, лимиты и настройки:",
             reply_markup=keyboards.site_keyboard(),
         )
+    elif context.user_data.get("pending_sort_category"):
+        await sorting.handle_new_category_text(update, context)
     elif context.user_data.get("pending_goal"):
         await goals.handle_goal_amount_text(update, context)
     else:
@@ -137,6 +140,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("goal", goals.cmd_goal, filters=private))
     app.add_handler(CommandHandler("goals", goals.cmd_goals, filters=private))
     app.add_handler(CommandHandler("review", ai_review.cmd_review, filters=private))
+    app.add_handler(CommandHandler("sort", sorting.cmd_sort, filters=private))
     app.add_handler(CommandHandler("grant", admin.cmd_grant, filters=private))
     app.add_handler(CommandHandler("revoke", admin.cmd_revoke, filters=private))
     app.add_handler(CommandHandler("users", admin.cmd_users, filters=private))
@@ -155,6 +159,10 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(reminders.handle_no_spend, pattern=r"^reminder_nospend$"))
     app.add_handler(CallbackQueryHandler(imports.handle_bank_choice, pattern=r"^impbank:"))
     app.add_handler(CallbackQueryHandler(imports.handle_review_choice, pattern=r"^impuse:|^impnew:|^impskip:"))
+    app.add_handler(CallbackQueryHandler(sorting.handle_choice, pattern=r"^srtc:"))
+    app.add_handler(CallbackQueryHandler(sorting.handle_skip, pattern=r"^srtskip:"))
+    app.add_handler(CallbackQueryHandler(sorting.handle_new_category_request, pattern=r"^srtnew:"))
+    app.add_handler(CallbackQueryHandler(sorting.handle_stop, pattern=r"^srtstop$"))
 
     app.add_handler(MessageHandler(filters.Document.ALL & private, imports.handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & private, route_text))

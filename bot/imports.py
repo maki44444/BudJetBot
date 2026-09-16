@@ -121,6 +121,8 @@ async def _process_batch(message, context, uid, bank_code, bank_label, parsed, f
                 uid, category["id"] if category else None, row.type, row.amount,
                 row.raw_description, row.occurred_at, bank_code, row.raw_description,
                 batch_id, import_hash, row.is_transfer,
+                # категорию не угадали — запись пойдёт в разбор группами (/sort)
+                needs_category=not guessed and not row.is_transfer,
             )
             if tx_id:
                 imported += 1
@@ -146,6 +148,9 @@ async def _process_batch(message, context, uid, bank_code, bank_label, parsed, f
         lines.append(f"♻️ Уже было импортировано раньше: {duplicate}")
     if review_queue:
         lines.append(f"❓ Похоже на дубли, нужно уточнить: {len(review_queue)}")
+    groups = await db.count_category_groups(uid)
+    if groups:
+        lines.append(f"\n🗂 Без категории: {groups} групп — разобрать: /sort")
     await message.reply_text("\n".join(lines), reply_markup=keyboards.main_keyboard())
 
     if review_queue:
