@@ -323,11 +323,27 @@ createApp({
 
     async changeCategory(t, event) {
       const categoryId = Number(event.target.value);
-      await this.api(`/api/transactions/${t.id}`, {
+      const res = await this.api(`/api/transactions/${t.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ category_id: categoryId }),
       });
+      // одно описание могло разъехаться по категориям — предлагаем поправить
+      // всё разом, иначе придётся искать такие же записи руками
+      if (res && res.same_count > 0) {
+        const ok = confirm(
+          `Ещё ${res.same_count} записей «${t.description}» ` +
+          `на ${this.fmt(res.same_total)} ₽ лежат в других категориях.\n\n` +
+          `Исправить их тоже?`
+        );
+        if (ok) {
+          await this.api(`/api/transactions/${t.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ category_id: categoryId, apply_to_same: true }),
+          });
+        }
+      }
       await this.reloadAll();
     },
 

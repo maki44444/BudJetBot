@@ -82,6 +82,7 @@ async def handle_bank_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def _process_batch(message, context, uid, bank_code, bank_label, parsed, filename):
     batch_id = await db.create_import_batch(uid, bank_code, filename)
     categories_cache: dict[str, list[dict]] = {}
+    guess_cache: dict[tuple[str, str], tuple[dict | None, str]] = {}
     imported = reconciled = duplicate = transfers = 0
     review_queue = []
 
@@ -113,9 +114,24 @@ async def _process_batch(message, context, uid, bank_code, bank_label, parsed, f
             # Переводы между своими счетами не участвуют ни в одной сводке,
             # поэтому категорию для них не угадываем: на реальных выписках это
             # 261 запрос к ИИ из 682 — впустую и прямиком в лимиты бесплатного API
-            guessed = None
+            # Кэш на время разбора файла: догадки ИИ больше не оседают в памяти
+            # категорий, а одно и то же описание в выписке встречается десятки
+            # раз — без кэша это лишние запросы и упор в лимиты бесплатного API
+            guessed, source = None, ""
             if not row.is_transfer:
-                guessed = await autocategorize.guess(uid, row.raw_description, row.type, cats)
+                key = ((row.raw_description or "").strip().lower(), row.type)
+                if key in guess_cache:
+                    guessed, source = guess_cache[key]
+                else:
+                    guessed, source = await autocategorize.guess_with_source(
+                        uid, row.raw_description, row.type, cats
+                    )
+                    guess_cache[key] = (guessed, source)
+            # «Другое» от ИИ — не ответ, а та же неизвестность: такая запись
+            # обязана попасть в разбор, иначе тихо осядет в общей куче.
+            # То же «Другое» из памяти — осознанный выбор, его не трогаем
+            if guessed and source == "ai" and guessed["name"] == _FALLBACK_CATEGORY[row.type]:
+                guessed = None
             category = guessed or await db.find_category_by_name(uid, _FALLBACK_CATEGORY[row.type])
             tx_id = await db.add_imported_transaction(
                 uid, category["id"] if category else None, row.type, row.amount,
@@ -128,8 +144,11 @@ async def _process_batch(message, context, uid, bank_code, bank_label, parsed, f
                 imported += 1
                 if row.is_transfer:
                     transfers += 1
-                elif guessed and row.raw_description:
-                    await db.remember_category(uid, row.raw_description, guessed["id"])
+                # Догадку ИИ в память НЕ пишем. Память — это решения человека;
+                # запись туда машинных догадок давала самоподкрепление: одна
+                # ошибка закреплялась, копила uses и начинала перетягивать
+                # на себя всё похожее (так каршеринг и самокаты уехали
+                # в «Продукты» на 51 и 14 записей).
             else:
                 duplicate += 1
 

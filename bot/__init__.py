@@ -148,6 +148,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(transactions.handle_category_choice, pattern=r"^cat:"))
     app.add_handler(CallbackQueryHandler(transactions.handle_change_request, pattern=r"^chg:"))
     app.add_handler(CallbackQueryHandler(transactions.handle_change_choice, pattern=r"^chgc:"))
+    app.add_handler(CallbackQueryHandler(transactions.handle_apply_same, pattern=r"^same:"))
     app.add_handler(CallbackQueryHandler(transactions.handle_oneoff, pattern=r"^oneoff:"))
     app.add_handler(CallbackQueryHandler(transactions.handle_delete_request, pattern=r"^delq:"))
     app.add_handler(CallbackQueryHandler(transactions.handle_undo_confirm, pattern=r"^undo:"))

@@ -45,6 +45,14 @@ def change_category_keyboard(categories: list[dict], tx_id: int, columns: int = 
     return InlineKeyboardMarkup(rows)
 
 
+def apply_to_same_keyboard(tx_id: int, category_id: int) -> InlineKeyboardMarkup:
+    """Предложение распространить исправленную категорию на все записи
+    с тем же описанием."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("🧩 Исправить все такие", callback_data=f"same:{tx_id}:{category_id}")
+    ]])
+
+
 def sort_group_keyboard(categories: list[dict], token: int, columns: int = 2) -> InlineKeyboardMarkup:
     """Выбор категории сразу для всей группы записей (разбор после импорта).
     token — номер текущей группы: по нему отсекаются нажатия на старые

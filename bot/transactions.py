@@ -195,8 +195,40 @@ async def handle_change_choice(update: Update, context: ContextTypes.DEFAULT_TYP
     if tx["description"]:
         await db.remember_category(uid, tx["description"], category_id)
     sign = "+" if tx["type"] == "income" else "-"
+    text = f"✅ {sign}{common.fmt_amount(tx['amount'])}₽ — {category['icon']} {category['name']}"
+
+    # То же описание могло разъехаться по разным категориям (ИИ угадывал
+    # по-разному) — предлагаем поправить всё разом, а не по одной записи
+    same, same_total = await db.count_same_description(
+        uid, tx["description"] or "", tx["type"], category_id
+    )
+    if same:
+        await query.edit_message_text(
+            f"{text}\n\nЕщё {same} записей «{tx['description']}» "
+            f"на {common.fmt_amount(same_total)}₽ лежат в других категориях.",
+            reply_markup=keyboards.apply_to_same_keyboard(tx_id, category_id),
+        )
+        return
+    await query.edit_message_text(text)
+
+
+async def handle_apply_same(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """«Исправить все такие» — одна категория всем записям с этим описанием."""
+    query = update.callback_query
+    await query.answer()
+    _, tx_id, category_id = query.data.split(":")
+    uid = update.effective_user.id
+    tx = await db.get_transaction(uid, int(tx_id))
+    category = await db.get_category(int(category_id))
+    if not tx or not category:
+        await query.edit_message_text("Запись или категория не найдена.")
+        return
+    count, total = await db.apply_category_to_description(
+        uid, tx["description"] or "", tx["type"], int(category_id)
+    )
     await query.edit_message_text(
-        f"✅ {sign}{common.fmt_amount(tx['amount'])}₽ — {category['icon']} {category['name']}"
+        f"✅ «{tx['description']}» → {category['icon']} {category['name']}\n"
+        f"Исправлено записей: {count} на {common.fmt_amount(total)}₽"
     )
 
 

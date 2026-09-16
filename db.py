@@ -405,9 +405,28 @@ async def remember_category(telegram_id: int, description: str, category_id: int
         """, telegram_id, phrase, category_id)
 
 
+# Слово считается «шумным», если встречается в такой доле фраз памяти: оно
+# ничего не различает. На реальных данных это оказались moscow (26% фраз),
+# «перевод», «сбп», «получатель», «через», moskva — из-за них «Moskva Metro
+# Moskva» совпадало с «gost win moskva» и уезжало в Продукты вместе с
+# каршерингом и самокатами.
+_NOISE_SHARE = 0.10
+_NOISE_MIN_PHRASES = 3
+
+
+def _noise_words(phrases: list[str]) -> set[str]:
+    counts: dict[str, int] = {}
+    for phrase in phrases:
+        for word in {w for w in phrase.split() if len(w) >= 3}:
+            counts[word] = counts.get(word, 0) + 1
+    limit = max(_NOISE_MIN_PHRASES, int(len(phrases) * _NOISE_SHARE))
+    return {word for word, n in counts.items() if n >= limit}
+
+
 async def recall_category(telegram_id: int, description: str, type_: str) -> dict | None:
-    """Ищет категорию по прошлым выборам: точная фраза, иначе пересечение слов
-    («такси» найдёт запомненное «такси до дома» и наоборот)."""
+    """Ищет категорию по прошлым выборам: сначала точная фраза, иначе
+    пересечение по ЗНАЧАЩИМ словам («пятёрочка» найдёт другую пятёрочку,
+    а общий для всех «moscow» — не повод считать операции похожими)."""
     phrase, tokens = _normalize_phrase(description)
     if not phrase:
         return None
@@ -417,12 +436,38 @@ async def recall_category(telegram_id: int, description: str, type_: str) -> dic
             SELECT c.id, c.name, c.icon
             FROM category_memory m
             JOIN categories c ON c.id = m.category_id
-            WHERE m.telegram_id = $1 AND c.type = $2
-              AND (m.phrase = $3 OR string_to_array(m.phrase, ' ') && $4::text[])
-            ORDER BY (m.phrase = $3) DESC, m.uses DESC, m.updated_at DESC
+            WHERE m.telegram_id = $1 AND c.type = $2 AND m.phrase = $3
+            ORDER BY m.uses DESC, m.updated_at DESC
             LIMIT 1
-        """, telegram_id, type_, phrase, words)
-        return dict(row) if row else None
+        """, telegram_id, type_, phrase)
+        if row:
+            return dict(row)
+        if not words:
+            return None
+
+        candidates = await conn.fetch("""
+            SELECT c.id, c.name, c.icon, m.phrase, m.uses
+            FROM category_memory m
+            JOIN categories c ON c.id = m.category_id
+            WHERE m.telegram_id = $1 AND c.type = $2
+              AND string_to_array(m.phrase, ' ') && $3::text[]
+        """, telegram_id, type_, words)
+        if not candidates:
+            return None
+        all_phrases = [r["phrase"] for r in await conn.fetch(
+            "SELECT phrase FROM category_memory WHERE telegram_id = $1", telegram_id)]
+
+    noise = _noise_words(all_phrases)
+    mine = {w for w in words if w not in noise}
+
+    def score(cand) -> int:
+        """Сколько значащих слов общего — шумные не считаем."""
+        return len(mine & {w for w in cand["phrase"].split() if len(w) >= 3})
+
+    best = max(candidates, key=lambda c: (score(c), c["uses"]))
+    if not score(best):
+        return None
+    return {"id": best["id"], "name": best["name"], "icon": best["icon"]}
 
 
 # ---------- transactions ----------
@@ -555,6 +600,47 @@ async def update_transaction_category(telegram_id: int, transaction_id: int, cat
             WHERE id = $1 AND telegram_id = $2
         """, transaction_id, telegram_id, category_id)
         return result != "UPDATE 0"
+
+
+async def count_same_description(
+    telegram_id: int, description: str, type_: str, category_id: int
+) -> tuple[int, Decimal]:
+    """Сколько ЕЩЁ записей с тем же описанием лежат в другой категории.
+    По ним предлагается исправить всё разом: одна и та же «Moskva Metro Moskva»
+    легко расползается по категориям, если ИИ угадывал её по-разному."""
+    if not description:
+        return 0, Decimal(0)
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT COUNT(*) AS cnt, COALESCE(SUM(amount), 0) AS total
+            FROM transactions
+            WHERE telegram_id = $1 AND description = $2 AND type = $3
+              AND NOT is_transfer
+              AND (category_id IS DISTINCT FROM $4)
+        """, telegram_id, description, type_, category_id)
+        return row["cnt"], row["total"]
+
+
+async def apply_category_to_description(
+    telegram_id: int, description: str, type_: str, category_id: int
+) -> tuple[int, Decimal]:
+    """Ставит категорию ВСЕМ записям с таким описанием — в отличие от
+    assign_category_to_group, которая трогает только неразобранные.
+    Нужна при ручном исправлении: ИИ мог уверенно, но неверно разложить
+    одно и то же описание по разным категориям."""
+    if not description:
+        return 0, Decimal(0)
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch("""
+            UPDATE transactions
+            SET category_id = $4, needs_category = FALSE
+            WHERE telegram_id = $1 AND description = $2 AND type = $3
+              AND NOT is_transfer
+              AND (category_id IS DISTINCT FROM $4 OR needs_category)
+            RETURNING amount
+        """, telegram_id, description, type_, category_id)
+    await remember_category(telegram_id, description, category_id)
+    return len(rows), sum((r["amount"] for r in rows), Decimal(0))
 
 
 async def set_transaction_transfer(telegram_id: int, transaction_id: int, is_transfer: bool) -> bool:

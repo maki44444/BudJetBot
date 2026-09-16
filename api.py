@@ -193,25 +193,44 @@ class TxPatch(BaseModel):
     category_id: int | None = None
     is_oneoff: bool | None = None
     is_transfer: bool | None = None
+    apply_to_same: bool = False
+    """Поставить категорию всем записям с тем же описанием, а не только этой."""
 
 
 @app.patch("/api/transactions/{tx_id}")
 async def api_update_transaction(tx_id: int, body: TxPatch, uid: int = Depends(get_current_user)):
     if body.category_id is None and body.is_oneoff is None and body.is_transfer is None:
         raise HTTPException(status_code=400, detail="Нечего менять")
+    same_count, same_total = 0, 0
     if body.category_id is not None:
         category = await db.get_category(body.category_id)
         if category is None or (category["telegram_id"] not in (None, uid)):
             raise HTTPException(status_code=400, detail="Категория не найдена")
-        if not await db.update_transaction_category(uid, tx_id, body.category_id):
+        tx = await db.get_transaction(uid, tx_id)
+        if not tx:
             raise HTTPException(status_code=404, detail="Запись не найдена")
+        if body.apply_to_same:
+            # одно и то же описание могло разъехаться по категориям — правим разом
+            same_count, same_total = await db.apply_category_to_description(
+                uid, tx["description"] or "", tx["type"], body.category_id
+            )
+        else:
+            if not await db.update_transaction_category(uid, tx_id, body.category_id):
+                raise HTTPException(status_code=404, detail="Запись не найдена")
+            if tx["description"]:
+                await db.remember_category(uid, tx["description"], body.category_id)
+            # сообщаем фронту, сколько таких же записей осталось в других
+            # категориях — он предложит исправить их одной кнопкой
+            same_count, same_total = await db.count_same_description(
+                uid, tx["description"] or "", tx["type"], body.category_id
+            )
     if body.is_oneoff is not None:
         if not await db.set_transaction_oneoff(uid, tx_id, body.is_oneoff):
             raise HTTPException(status_code=404, detail="Запись не найдена")
     if body.is_transfer is not None:
         if not await db.set_transaction_transfer(uid, tx_id, body.is_transfer):
             raise HTTPException(status_code=404, detail="Запись не найдена")
-    return {"ok": True}
+    return {"ok": True, "same_count": same_count, "same_total": str(same_total)}
 
 
 @app.delete("/api/transactions/{tx_id}")
